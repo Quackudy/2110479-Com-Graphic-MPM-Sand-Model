@@ -43,7 +43,7 @@ Source paths below are relative to the Vulkan project root.
 \end{enumerate}
 
 \section{Symbols and storage}
-\begin{longtable}{p{.23\linewidth}p{.20\linewidth}p{.47\linewidth}}
+\begin{longtable}{>{\raggedright\arraybackslash}p{.23\linewidth}>{\raggedright\arraybackslash}p{.20\linewidth}>{\raggedright\arraybackslash}p{.47\linewidth}}
 \toprule Meaning & Notation & Code \\\midrule\endhead
 Particle position/velocity & $\mat{x}_p,\mat{v}_p$ & \code{position.xyz}, \code{velocity.xyz} \\
 Grid spacing/timestep & $\Delta x,\Delta t$ & \code{params.step.y}, \code{params.step.x} \\
@@ -65,7 +65,7 @@ elastic/plastic section distinguishes it from the full geometric deformation
 Jacobian used in Nanson's formula and density conversion.
 
 \section{Paper-to-code map}
-\begin{longtable}{p{.22\linewidth}p{.69\linewidth}}
+\begin{longtable}{>{\raggedright\arraybackslash}p{.22\linewidth}>{\raggedright\arraybackslash}p{.69\linewidth}}
 \toprule Paper & Implementation \\\midrule\endhead
 \S4.1, Eq.~(4) & \src{shaders/interpolation.glsl}, \code{interpolation()}: the sine-corrected compact 1D kernel. \\
 \S4.2, Eq.~(5) & \code{kernelWeight()} in the same file: product of the three axis weights. \\
@@ -147,9 +147,9 @@ explicitly summing the kernel derivatives in Eq.~(18).
 
 \section{Sand model and source provenance}
 The paper identifies Drucker--Prager sand and its example parameters in \S6.2.
-Detailed SVD and return mapping are traced to
-\src{../CK-MPM/include/mpm_material.cuh},
-\code{ComputeStress<kDruckerPragerStvkhencky>}, and its callers in
+The material overload of \code{ComputeStress()} in
+\src{../CK-MPM/include/mpm_material.cuh} uses the model
+\code{kDruckerPragerStvkhencky}. Its callers are in
 \src{../CK-MPM/include/mpm_algorithm.cuh}.
 
 In \src{shaders/material.glsl}, \code{svd3()} factors F using one-sided Jacobi
@@ -191,7 +191,7 @@ analytic affine fields, two-step state reuse and GPU safety reductions.
 \src{tools/cuda_material_reference.cu} executes the author's material/SVD.
 These checks do not reproduce the full paper experiments.
 
-\begin{longtable}{p{.45\linewidth}p{.46\linewidth}}
+\begin{longtable}{>{\raggedright\arraybackslash}p{.45\linewidth}>{\raggedright\arraybackslash}p{.46\linewidth}}
 \toprule Source & Application role \\\midrule\endhead
 \src{shaders/particle_health.comp}, \code{Simulation::health()} & GPU finite-state, domain/stencil and maximum-speed reduction. \\
 \src{src/renderer.cpp}, \src{shaders/particle.vert}, \src{shaders/particle.frag} & Particle spheres, camera rendering and direct reads of live GPU particle state. \\

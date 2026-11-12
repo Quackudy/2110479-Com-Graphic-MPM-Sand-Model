@@ -1,11 +1,11 @@
 # Paper and mathematics
 
-Two independent LaTeX documents:
+Two documents, each available as PDF and LaTeX source:
 
-1. [Mathematical Foundations and Derivations](math_foundations.tex): the learning
+1. **Mathematical Foundations and Derivations** ([PDF](math_foundations.pdf), [LaTeX](math_foundations.tex)): the learning
    route from derivatives and Jacobians through Nanson's formula, stress,
    weak forms, MPM, CK weights, affine transfers, MLS and sand plasticity.
-2. [Paper-to-Code Map](paper_code_map.tex): connects paper sections and equations
+2. **Paper-to-Code Map** ([PDF](paper_code_map.pdf), [LaTeX](paper_code_map.tex)): connects paper sections and equations
    to the current shader/C++ functions and identifies implementation differences.
 
 Start with the foundations if an equation feels unfamiliar. Each section lists
@@ -33,7 +33,8 @@ pdflatex -halt-on-error paper_code_map.tex
 ```
 
 Two passes resolve contents, cross-references and table widths. PDFs appear
-beside the sources; generated files are ignored by Git. Keep both PDFs in this
+beside the sources. Auxiliary files are ignored by Git; PDFs are included with
+the documentation. Keep both PDFs in this
 folder for their companion/source links to resolve. PDF viewers may require
 approval before opening relative source-file links.
 
@@ -42,5 +43,12 @@ to the Vulkan project root. The neighboring CK-MPM checkout supplies the author
 source links. Bibliographies include primary papers and continuum-mechanics
 teaching references.
 
-No LaTeX compiler is installed in the current workspace. Source structure and
-links have been checked, but PDF compilation and layout remain unverified.
+The PDFs can also be rebuilt with Tectonic, which handles repeated passes
+automatically:
+
+```sh
+tectonic math_foundations.tex
+tectonic paper_code_map.tex
+```
+
+Regenerate both PDFs after editing their sources.

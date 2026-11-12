@@ -7,7 +7,7 @@
 \newcommand{\mat}[1]{\mathbf{#1}}
 \newcommand{\code}[1]{\texttt{\detokenize{#1}}}
 \newcommand{\src}[1]{\href{../../#1}{\nolinkurl{#1}}}
-\newcommand{\prereq}[1]{\textit{Builds on: #1.}\par}
+\newcommand{\prereq}[1]{\textit{Builds on: #1}\par}
 \newcommand{\checkpoint}[1]{\par\textbf{Check your understanding.} #1\par}
 \newcommand{\topic}[2]{\boxed{\text{\hyperref[#1]{#2}}}}
 \DeclareMathOperator{\tr}{tr}
@@ -64,7 +64,7 @@ prerequisites that a simple chain cannot show.
 \topic{sec:svd}{SVD}\to\topic{sec:energy}{Elastic stress}\to
 \topic{sec:plastic}{Yield/return map}\to\topic{sec:trace}{One timestep}
 \]
-\begin{longtable}{p{.29\linewidth}p{.62\linewidth}}
+\begin{longtable}{>{\raggedright\arraybackslash}p{.29\linewidth}>{\raggedright\arraybackslash}p{.62\linewidth}}
 \toprule Result & Immediate prerequisites \\\midrule\endhead
 Deformation F & Derivative, Jacobian, first-order Taylor approximation. \\
 Volume J and density & F, determinant, change of variables, conservation of mass. \\
@@ -687,7 +687,7 @@ These equations explain the \code{pHat}, U, V and final multiplication by
 \code{transpose(F)} in \code{sandMaterial()}. With $s_a=1$, every logarithm is
 zero and the stress is zero even for a rigid rotation.
 
-\subsection{Why E and Poisson ratio lead to the Lame parameters}
+\subsection{Why E and Poisson ratio lead to the Lam\'e parameters}
 For small strains the same law linearizes to
 $\boldsymbol\sigma=2\mu\boldsymbol\varepsilon
 +\lambda\tr(\boldsymbol\varepsilon)\mat I$.
@@ -697,10 +697,13 @@ $2\mu b+\lambda(a+2b)=0$, so
 \nu=-b/a=\frac{\lambda}{2(\lambda+\mu)},\qquad
 E=\sigma_{11}/a=\frac{\mu(3\lambda+2\mu)}{\lambda+\mu}.
 \]
-Solving these two relations gives the formulas used in
-Section~\ref{sec:time} and \code{SimulationConfig::parameters()}:
-$\mu=E/[2(1+\nu)]$ and
-$\lambda=E\nu/[(1+\nu)(1-2\nu)]$.
+Solving these two relations gives
+\[
+\mu=\frac{E}{2(1+\nu)},\qquad
+\lambda=\frac{E\nu}{(1+\nu)(1-2\nu)}.
+\]
+These expressions are used in Section~\ref{sec:time} and in
+\code{parameters()} in \src{src/simulation_config.cpp}.
 \checkpoint{Doubling E at fixed Poisson ratio doubles both elastic moduli;
 wave speed grows approximately by $\sqrt2$, reducing the acoustic step scale.}
 
@@ -836,7 +839,7 @@ At the beginning of a step, each particle has position, velocity, elastic F,
 affine C, material stress and history. Corrected stress from the previous step
 feeds the current force scatter. The initial F is identity with zero stress.
 
-\begin{longtable}{p{.20\linewidth}p{.71\linewidth}}
+\begin{longtable}{>{\raggedright\arraybackslash}p{.20\linewidth}>{\raggedright\arraybackslash}p{.71\linewidth}}
 \toprule Stage & Mathematical ancestry and implementation \\\midrule\endhead
 Weights & Derivative smoothness $\to$ compact sine kernel $\to$ dual-grid moment consistency; \src{shaders/interpolation.glsl}. \\
 P2G & Particle quadrature plus affine least squares supplies mass and local momentum. Nanson $\to$ Piola stress $\to$ weak force $\to$ moment-based force approximation supplies the stress term, subject to Section~\ref{sec:order-audit}; \src{shaders/p2g.comp}. \\
@@ -892,6 +895,7 @@ and the exact author overload cited above. The project reference tests check
 implementation behavior; they do not replace these mathematical arguments.
 
 \begin{thebibliography}{9}
+\raggedright
 \bibitem{ck} M. Liu, X. Wang and M. Li.
 \emph{CK-MPM: A Compact-Kernel Material Point Method}. ACM TOG 44(4), 2025.
 \href{https://doi.org/10.1145/3731155}{doi:10.1145/3731155}.
