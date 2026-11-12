@@ -1,0 +1,920 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=24mm]{geometry}
+\usepackage{amsmath,amssymb,array,booktabs,longtable}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\newcommand{\mat}[1]{\mathbf{#1}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\src}[1]{\href{../../#1}{\nolinkurl{#1}}}
+\newcommand{\prereq}[1]{\textit{Builds on: #1.}\par}
+\newcommand{\checkpoint}[1]{\par\textbf{Check your understanding.} #1\par}
+\newcommand{\topic}[2]{\boxed{\text{\hyperref[#1]{#2}}}}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\cof}{cof}
+\DeclareMathOperator{\Div}{Div}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+\setlength{\emergencystretch}{2em}
+\renewcommand{\arraystretch}{1.18}
+\numberwithin{equation}{section}
+\title{Mathematical Foundations and Derivations\\for CK-MPM and Sand Simulation}
+\author{A learning companion to the paper-to-code map}
+\date{}
+\begin{document}
+\maketitle
+
+\textbf{Purpose.} Start with derivatives and small matrices, then follow how
+geometry, continuum mechanics and discretization produce the equations used
+in CK-MPM. This is a connected learning route for the paper's core numerical
+method and the current sand model, not a claim to prove every theorem or GPU
+optimization in the paper. The companion
+\href{paper_code_map.pdf}{\emph{Paper-to-Code Guide}} locates implementation
+functions. Equations numbered here belong to this document; ``paper Eq.''
+refers to Liu, Wang and Li's CK-MPM paper~\cite{ck}.
+
+The examples and derivations below use ordinary column-vector notation.
+A result derived from stated assumptions, a model choice and an expression
+copied from the author implementation are different kinds of evidence.
+Sections~\ref{sec:mls} and~\ref{sec:history} identify places where that distinction
+matters. No simulation code is changed by this guide.
+
+\tableofcontents
+\newpage
+
+\section{Dependency map and notation}\label{sec:map}
+The boxes are clickable reading routes. The table gives the cross-branch
+prerequisites that a simple chain cannot show.
+\[
+\topic{sec:jacobian}{Derivatives/Jacobian}\to
+\topic{sec:deformation}{Deformation}\to
+\topic{sec:volume}{Volume and mass}
+\]
+\[
+\topic{sec:nanson}{Area/Nanson}\to
+\topic{sec:stress}{Stress conversion}\to
+\topic{sec:weak}{Weak form}\to\topic{sec:mpm}{MPM}
+\]
+\[
+\topic{sec:kernel}{Kernel}\to\topic{sec:dual}{Dual-grid moments}\to
+\topic{sec:apic}{Affine fit}\to\topic{sec:mls}{MLS forces}
+\]
+\[
+\topic{sec:svd}{SVD}\to\topic{sec:energy}{Elastic stress}\to
+\topic{sec:plastic}{Yield/return map}\to\topic{sec:trace}{One timestep}
+\]
+\begin{longtable}{p{.29\linewidth}p{.62\linewidth}}
+\toprule Result & Immediate prerequisites \\\midrule\endhead
+Deformation F & Derivative, Jacobian, first-order Taylor approximation. \\
+Volume J and density & F, determinant, change of variables, conservation of mass. \\
+Nanson's formula & F, oriented area/cross product, determinant and inverse transpose. \\
+Piola stress P & Cauchy traction, equality of physical force, Nanson's formula. \\
+Weak internal force & Momentum balance, integration by parts, P, chain rule. \\
+Particle/grid MPM force & Weak form, shape functions, particle quadrature and lumped mass. \\
+Deformation evolution & Chain rule in space and time; velocity gradient. \\
+CK first-order consistency & Compact weights, partition of unity, two grid offsets. \\
+APIC affine fit & Outer products, weighted least squares, dual-grid moment identities. \\
+MLS force approximation & Affine fit, shape gradients, the weak internal force. \\
+Hencky stress & SVD, logarithmic stretch, differentiating elastic energy. \\
+Sand return mapping & Hencky stress, volumetric/deviatoric split and a yield criterion. \\\bottomrule
+\end{longtable}
+
+\textbf{Notation.} $\mat{X}$ is a material/reference position and $\mat{x}$ a
+current/spatial position. Roman $i,j$ index spatial components, capital $A,B$
+index reference components; repeated component indices are summed. A particle
+index $p$ and a grid index $k$ are not summed unless a summation is written.
+$\nabla f$ is a column gradient, $(\nabla\mat{v})_{ij}=\partial v_i/\partial x_j$,
+and $(\Div\mat{P})_i=\partial P_{iA}/\partial X_A$.
+
+Until plasticity is introduced, F is the Jacobian of the full deformation map.
+In the plasticity sections we distinguish total F from elastic $\mat{F}^e$.
+A corrected elastic matrix stored by a solver must not automatically be treated
+as the full geometric deformation Jacobian.
+
+\section{Derivatives, matrices and the Jacobian}\label{sec:jacobian}
+\prereq{Functions, coordinates, addition and multiplication.}
+A derivative describes how an output changes under a small input change:
+\[
+f'(a)=\lim_{h\to0}\frac{f(a+h)-f(a)}h,
+\qquad f(a+h)=f(a)+f'(a)h+O(h^2)
+\]
+for a sufficiently smooth function. For $f(x_1,x_2)$, the partial derivative
+$\partial f/\partial x_1$ varies $x_1$ while holding $x_2$ fixed. Collecting the
+partial derivatives gives the gradient, so a small vector increment obeys
+$f(\mat{x}+\mat{h})\approx f(\mat{x})+\nabla f(\mat{x})^T\mat{h}$.
+
+For a vector-valued function $\mat{f}:\mathbb R^n\to\mathbb R^m$, each output
+has its own gradient. Stacking those gradients as rows gives its
+\emph{Jacobian matrix}:
+\begin{equation}\label{eq:jacobian}
+\mat{J}_{\mat f}=\left[\frac{\partial f_i}{\partial x_j}\right],
+\qquad
+\mat f(\mat x+\mat h)\approx\mat f(\mat x)+\mat J_{\mat f}(\mat x)\mat h.
+\end{equation}
+For $\mat f(X_1,X_2)=(2X_1+X_2,X_2^2)$, the Jacobian at $(1,1)$ is
+$\left[\begin{smallmatrix}2&1\\0&2\end{smallmatrix}\right]$.
+Thus $(.01,0)$ changes the output by approximately $(.02,0)$, whereas
+$(0,.01)$ changes it by approximately $(.01,.02)$.
+
+A transpose exchanges rows and columns. For column vectors $\mat a,\mat b$,
+$\mat a^T\mat b$ is a scalar dot product, while $\mat a\mat b^T$ is an outer
+product with entry $a_i b_j$. For matrices, define the double contraction
+$\mat A:\mat B=\sum_{ij}A_{ij}B_{ij}=\tr(\mat A^T\mat B)$.
+Matrix order matters: generally $\mat A\mat B\ne\mat B\mat A$.
+
+The chain rule is matrix multiplication:
+$\mat J_{\mat g\circ\mat f}=\mat J_{\mat g}\mat J_{\mat f}$.
+An inverse matrix reverses an invertible local map. It does not mean taking
+the reciprocal of every matrix entry.
+\checkpoint{The Jacobian is a matrix; its determinant is a scalar. The symbol J
+later denotes the determinant of F, not the Jacobian matrix itself.}
+
+\section{Deformation and the velocity gradient}\label{sec:deformation}
+\prereq{Section~\ref{sec:jacobian}.}
+A motion map sends each material point to its current position:
+\[
+\mat x=\boldsymbol\phi(\mat X,t),\qquad
+F_{iA}=\frac{\partial\phi_i}{\partial X_A}.
+\]
+Applying the Jacobian approximation to neighboring material points gives
+\begin{equation}\label{eq:line-map}
+\mathrm d\mat x=\mat F\,\mathrm d\mat X.
+\end{equation}
+F records local stretching, shearing and rotation. Translation disappears
+under differentiation. For displacement $\mat u=\boldsymbol\phi-\mat X$,
+$\mat F=\mat I+\nabla_X\mat u$.
+
+Examples: a translation has $\mat F=\mat I$; a rigid rotation has
+$\mat F=\mat R$, $\mat R^T\mat R=\mat I$; and a uniform stretch has
+$\mat F=\diag(s_1,s_2,s_3)$. The shear map $x_1=X_1+\gamma X_2$, $x_2=X_2$
+has $\mat F=\left[\begin{smallmatrix}1&\gamma\\0&1\end{smallmatrix}\right]$.
+
+Let $\mat v(\mat x,t)=\partial_t\boldsymbol\phi(\mat X,t)$ evaluated along
+that motion. Differentiating F and using the chain rule gives
+\begin{equation}\label{eq:Fdot}
+\dot F_{iA}=\frac{\partial v_i}{\partial x_j}F_{jA},
+\qquad \dot{\mat F}=\mat L\mat F,\quad\mat L=\nabla_x\mat v.
+\end{equation}
+Forward Euler over a small step gives
+$\mat F^{\rm trial}=(\mat I+\Delta t\,\mat L)\mat F^n$.
+This is the deformation-update structure in paper Eq.~(19). Later the affine
+fit approximates L.
+
+For a scalar spatial function $w(\mat x)$, differentiation of
+$w(\boldsymbol\phi(\mat X))$ gives another useful chain rule:
+\begin{equation}\label{eq:gradient-transform}
+\nabla_X w=\mat F^T\nabla_x w.
+\end{equation}
+\checkpoint{Velocity has units length/time, L has units $1$/time, and F is
+dimensionless. Therefore $\mat I+\Delta t\,\mat L$ has consistent units.}
+
+\section{Determinants, volume and mass}\label{sec:volume}
+\prereq{Section~\ref{sec:deformation}; dot and cross products.}
+Three short edge vectors $\mat a,\mat b,\mat c$ span an oriented volume
+$\mat a\cdot(\mat b\times\mat c)$. A matrix transforms that triple product by
+its determinant:
+\[
+(\mat F\mat a)\cdot[(\mat F\mat b)\times(\mat F\mat c)]
+=\det(\mat F)\,\mat a\cdot(\mat b\times\mat c).
+\]
+Writing $J=\det\mat F$, an orientation-preserving deformation has $J>0$ and
+\begin{equation}\label{eq:volume}
+\mathrm dv=J\,\mathrm dV.
+\end{equation}
+Lowercase $\mathrm dv$ is current volume; uppercase $\mathrm dV$ is reference
+volume. With $\mat F=\diag(2,1,.5)$, J is one: volume is unchanged despite
+changes in shape. A rotation has J one too.
+
+A material element keeps its mass. If $\rho_R$ is reference mass density and
+$\rho$ is current density, then
+\begin{equation}\label{eq:mass}
+\rho\,\mathrm dv=\rho_R\,\mathrm dV
+\quad\Longrightarrow\quad \rho J=\rho_R.
+\end{equation}
+This is the reference/current mass-balance connection behind the paper's
+continuum preliminaries. Reference quadrature volume $V_{p,0}$ stays fixed;
+current geometric volume would be $J_pV_{p,0}$.
+
+For an invertible F, differentiation of a determinant yields
+$\dot J=J\tr(\mat F^{-1}\dot{\mat F})$.
+Using \eqref{eq:Fdot} and cyclic invariance of trace gives
+$\dot J=J\tr\mat L=J\nabla\cdot\mat v$.
+Differentiating \eqref{eq:mass} then gives
+$\dot\rho+\rho\nabla\cdot\mat v=0$.
+\checkpoint{J describes local volume change, not a particle count and not the
+simulation timestep. These meanings must remain separate.}
+
+\section{Oriented area and Nanson's formula}\label{sec:nanson}
+\prereq{Sections~\ref{sec:deformation} and~\ref{sec:volume}.}
+A surface patch is spanned by two small tangent vectors $\mat a,\mat b$.
+Their cross product contains both orientation and area:
+$\mat a\times\mat b=\mat N\,\mathrm dA$, where N is the reference unit normal.
+After deformation, the tangents become F a and F b, so
+$(\mat F\mat a)\times(\mat F\mat b)=\mat n\,\mathrm da$.
+
+To find the transformation, test the deformed area vector against an arbitrary
+third vector $\mat F\mat c$. The determinant identity gives
+\begin{align*}
+[(\mat F\mat a)\times(\mat F\mat b)]\cdot\mat F\mat c
+&=J(\mat a\times\mat b)\cdot\mat c,\\
+\mat F^T[(\mat F\mat a)\times(\mat F\mat b)]
+&=J(\mat a\times\mat b).
+\end{align*}
+The second equality follows because the first holds for every c. Multiplying
+by $\mat F^{-T}$ proves the area-vector transformation:
+\begin{equation}\label{eq:nanson}
+\boxed{\mat n\,\mathrm da=J\mat F^{-T}\mat N\,\mathrm dA
+=\cof(\mat F)\mat N\,\mathrm dA.}
+\end{equation}
+Here $\mat F^{-T}=(\mat F^{-1})^T$ and
+$\cof(\mat F)=J\mat F^{-T}$ for invertible F. This is Nanson's formula;
+continuum-mechanics references give this bridge explicitly~\cite{sandia,nptel}.
+
+Taking magnitude and direction separately gives
+\[
+\frac{\mathrm da}{\mathrm dA}=J\|\mat F^{-T}\mat N\|,
+\qquad
+\mat n=\frac{\mat F^{-T}\mat N}{\|\mat F^{-T}\mat N\|}.
+\]
+\textbf{Worked check.} With $\mat F=\diag(2,1,.5)$ and $\mat N=\mat e_1$,
+J is one but the patch area scales by $1/2$. Its two tangents stretch by one
+and $1/2$. A normal along $\mat e_3$ gives area factor two instead.
+\checkpoint{Why not multiply surface area by J alone? Different orientations
+stretch differently. J transforms volume; Nanson transforms oriented area.}
+
+\section{Traction, Cauchy stress and Piola stress}\label{sec:stress}
+\prereq{Section~\ref{sec:nanson}.}
+Traction is force per unit current area on a plane with unit normal n.
+The Cauchy stress tensor $\boldsymbol\sigma$ maps that normal to traction:
+$\mat t=\boldsymbol\sigma\mat n$.
+The physical differential force must be identical when described per reference
+area. Define first Piola stress P by $\mathrm d\mat f=\mat P\mat N\,\mathrm dA$.
+Insert Nanson's formula into the current-area description:
+\[
+\mathrm d\mat f=\boldsymbol\sigma\mat n\,\mathrm da
+=J\boldsymbol\sigma\mat F^{-T}\mat N\,\mathrm dA.
+\]
+Since this holds for every reference normal,
+\begin{equation}\label{eq:piola}
+\boxed{\mat P=J\boldsymbol\sigma\mat F^{-T}},\qquad
+\boxed{\mat T=\mat P\mat F^T=J\boldsymbol\sigma}.
+\end{equation}
+T is the Kirchhoff stress in this notation. Sandia calls its Cauchy stress T;
+we use $\boldsymbol\sigma$ to avoid confusing it with the stored
+$\mat P\mat F^T$ in our shader. A symbol's name is not its physical definition.
+See also the stress-measure teaching reference~\cite{alberta}.
+
+Under ordinary balance without couple stresses, $\boldsymbol\sigma$ and T are
+symmetric. P need not be symmetric because its input normal is reference-based
+and its output force is spatial. It is a two-configuration tensor.
+
+\textbf{Worked check.} If $\mat F=2\mat I$, then $J=8$ and
+$\mat P=4\boldsymbol\sigma$. A reference patch grows to four times its area,
+so this correctly preserves its physical force.
+\checkpoint{Nanson's formula explains the conversion of stress measures. It
+is not an extra sand force or an algorithm called once per particle.}
+
+\section{Momentum balance and the weak internal force}\label{sec:weak}
+\prereq{Sections~\ref{sec:stress} and~\ref{sec:deformation}; integration.}
+For a material region, Newton's law equates momentum change to body and surface
+forces. Applying the divergence theorem to the surface traction gives the
+reference strong form
+\begin{equation}\label{eq:strong}
+\rho_R\ddot{\boldsymbol\phi}=\Div_X\mat P+\rho_R\mat g.
+\end{equation}
+The divergence theorem here means integrating a derivative inside a region is
+equivalent to integrating its normal flux on the boundary. For our row-divergence
+convention, $\int_{\Omega_0}\Div_X\mat P\,\mathrm dV
+=\int_{\partial\Omega_0}\mat P\mat N\,\mathrm dA$.
+
+Multiply \eqref{eq:strong} by a scalar test/shape function $w_i(\mat x)$ and
+integrate. Component-wise integration by parts gives
+\begin{align}
+\int_{\Omega_0}\rho_R w_i\ddot\phi_a\,\mathrm dV
+&=-\int_{\Omega_0}P_{aA}\frac{\partial w_i}{\partial X_A}\,\mathrm dV\notag\\
+&\quad+\int_{\partial\Omega_0}w_i(PN)_a\,\mathrm dA
++\int_{\Omega_0}\rho_R w_i g_a\,\mathrm dV.\label{eq:weak}
+\end{align}
+Here i labels a grid shape function, while a labels a vector component: they
+are independent indices. The minus sign is the integration-by-parts sign.
+For an interior node or zero prescribed traction, the explicit boundary term
+vanishes. Boundary conditions otherwise contribute force or constraints.
+
+Use \eqref{eq:gradient-transform} to move the shape gradient into spatial
+coordinates:
+\begin{equation}\label{eq:internal-integral}
+\mat f_i^{\rm int}
+=-\int_{\Omega_0}\mat P\mat F^T\nabla_x w_i\,\mathrm dV
+=-\int_{\Omega_0}\mat T\nabla_x w_i\,\mathrm dV.
+\end{equation}
+This explains both the negative sign and the $\mat P\mat F^T$ in paper Eq.~(2).
+The factor F transpose is supplied by the chain rule; Nanson supplied the
+stress conversion earlier in the dependency chain.
+
+There is a second check using current volume:
+$\boldsymbol\sigma\,\mathrm dv
+=\boldsymbol\sigma J\,\mathrm dV=\mat T\,\mathrm dV$.
+Thus $-\int_{\Omega_t}\boldsymbol\sigma\nabla w_i\,\mathrm dv$ is the same force.
+\checkpoint{Do not multiply by J a second time when already using reference
+volume and $\mat T=\mat P\mat F^T$. That would count the volume conversion twice.}
+
+\section{From integrals to MPM particles and grid nodes}\label{sec:mpm}
+\prereq{Section~\ref{sec:weak}; weighted sums.}
+Particle quadrature approximates a reference-volume integral by
+$\int_{\Omega_0}q\,\mathrm dV\approx\sum_p V_{p,0}q_p$.
+Particles carry mass $m_p=\rho_{R,p}V_{p,0}$ and state history; grid nodes provide
+locations for collecting and updating motion.
+
+Interpolate a grid field by shape functions $w_{i,p}=N_i(\mat x_p)$.
+The consistent mass matrix is approximated by
+$M_{ij}\approx\sum_p m_p w_{i,p}w_{j,p}$.
+With partition of unity $\sum_jw_{j,p}=1$, row-summing gives a diagonal
+\emph{lumped} nodal mass $m_i=\sum_p m_pw_{i,p}$. This replaces a coupled mass
+solve with independent nodal updates.
+
+For a single grid, the elementary transfers and force are
+\begin{align}
+m_i&=\sum_p w_{i,p}m_p,&
+\mat q_i&=\sum_p w_{i,p}m_p\mat v_p,\label{eq:p2g-basic}\\
+\mat f_i^{\rm int}&=-\sum_p V_{p,0}\mat T_p\nabla w_{i,p},&
+\mat u_i&=\frac{\mat q_i+\Delta t\,\mat f_i^{\rm int}}{m_i}
+                 +\Delta t\,\mat g.\label{eq:grid-basic}
+\end{align}
+The divisions apply only to sufficiently massive active nodes. Particles then
+gather grid velocity and advect using the new velocity. In a traditional
+kernel-gradient formulation, $\mat L_p\approx\sum_i\mat u_i(\nabla w_{i,p})^T$
+feeds \eqref{eq:Fdot}. The affine formulation below supplies another estimate.
+
+In our code, P2G adds stress momentum directly to q, so the grid update only
+normalizes the already-forced momentum, adds gravity and handles boundaries.
+This rearranges stages; it does not justify dropping the stress force.
+For CK, each grid gets its own full mass/momentum scatter, and the gathering
+and physical conservation totals account for averaging the two grids.
+
+\textbf{Tiny transfer example.} Two equal-mass particles send weight $1/2$
+to the same node with velocities $+1$ and $-1$. That node has positive mass
+and zero momentum, hence zero velocity. Repeating weighted averaging can erase
+velocity variation. Particle count is not the same thing as independent grain
+contacts: this is a discretized continuum.
+\checkpoint{Forces have units mass times length/time squared. In
+$V_{p,0}\mat T\nabla w$, volume contributes length cubed, stress force/area and
+gradient inverse length, giving force.}
+
+\section{Time integration, stability and the two clocks}\label{sec:time}
+\prereq{Sections~\ref{sec:deformation} and~\ref{sec:mpm}.}
+The particle update $\mat x^{n+1}=\mat x^n+\Delta t\,\mat v^{n+1}$ uses the
+updated velocity. Together with an explicit velocity kick this is the
+symplectic-Euler pattern. It does not allow an arbitrary timestep.
+
+For a spring $\ddot x=-\omega^2x$, the same pattern gives
+\[
+\begin{pmatrix}x^{n+1}\\v^{n+1}\end{pmatrix}
+=\begin{pmatrix}1-h^2\omega^2&h\\-h\omega^2&1\end{pmatrix}
+\begin{pmatrix}x^n\\v^n\end{pmatrix}.
+\]
+The matrix has determinant one and trace $2-h^2\omega^2$. Oscillatory bounded
+modes require $0<h\omega<2$; at the endpoint the repeated eigenvalue can be
+defective. Larger steps can amplify errors even when the intended motion is
+slow. Elastic waves give a related scale $h\sim\Delta x/c$.
+
+For small isotropic elastic disturbances, define
+\[
+\mu=\frac{E}{2(1+\nu)},\qquad
+\lambda=\frac{E\nu}{(1+\nu)(1-2\nu)},\qquad
+c=\sqrt{\frac{\lambda+2\mu}{\rho}}.
+\]
+Our automatic acoustic estimate is $\Delta t={\rm CFL}\,\Delta x/c$.
+It is a practical estimate, not a proof of nonlinear elastoplastic stability.
+
+A numerical step advances simulated time by $\Delta t$ regardless of how long
+the computer takes. With s steps per frame and R rendered frames per real
+second, the observed time ratio is approximately $s\Delta t R$.
+For $s=3$, $\Delta t=.0004$ and $R=60$, the ratio is .072.
+Larger s adds work and may reduce R; larger $\Delta t$ changes integration
+accuracy and stability. These are different controls.
+\checkpoint{A 16 ms computer work budget is not automatically 16 ms of stable
+physical evolution. Deriving $\Delta t=\text{desired simulated frame time}/s$
+is possible, but its numerical stability must be checked separately.}
+
+\section{Shape functions and the compact kernel}\label{sec:kernel}
+\prereq{Sections~\ref{sec:jacobian} and~\ref{sec:mpm}.}
+A shape function is a position-dependent interpolation weight. Useful properties
+include locality, nonnegativity and partition of unity. It is not simply the
+Euclidean distance; distance is an input to its formula.
+
+The 1D linear tent is $K_{\rm lin}(r)=\max(1-|r|,0)$. Its slope jumps at zero
+and at the support edges. A force that uses its derivative can therefore change
+abruptly when a particle crosses a cell boundary.
+
+The CK paper's Eq.~(4) chooses
+\begin{equation}\label{eq:ck}
+K(r)=\begin{cases}
+1-|r|+\dfrac{\sin(2\pi|r|)}{2\pi},& |r|\le1,\\
+0,&|r|>1.
+\end{cases}
+\end{equation}
+One can motivate the coefficient without assuming the result. Start on
+$0<r<1$ with $1-r+a\sin(2\pi r)$. Requiring the derivative to vanish at zero
+gives $-1+2\pi a=0$, hence $a=1/(2\pi)$. This is the simple chosen correction;
+it is not a proof that no other smooth compact kernels exist.
+
+For $0<r<1$, differentiation gives
+\[
+K'(r)=-1+\cos(2\pi r),\qquad K''(r)=-2\pi\sin(2\pi r).
+\]
+The first and second derivatives approach zero at the join points. Together
+with even symmetry and the zero exterior, this makes K $C^2$ continuous.
+Since $K'\le0$ on $(0,1)$ and $K(0)=1$, $K(1)=0$, weights are nonnegative.
+The sine integrates to zero over $(0,1)$, so symmetry gives
+$\int_{\mathbb R}K(r)\,\mathrm dr=1$.
+
+For $d\in[0,1]$,
+\begin{equation}\label{eq:unity}
+K(d)+K(1-d)=1,
+\end{equation}
+because $\sin(2\pi(1-d))=-\sin(2\pi d)$.
+This gives the two cell weights $w_0=K(d)$, $w_1=1-w_0$ in
+\src{shaders/interpolation.glsl}. In 3D, multiply the three axis weights;
+each grid contributes $2^3=8$ nodes. The paper's Eq.~(5) is this tensor product.
+
+\checkpoint{At $d=.25$, $w_0=.75+1/(2\pi)\approx.9092$ and $w_1\approx.0908$.
+They sum to one but are not the linear weights .75 and .25.}
+
+\section{Why two shifted grids are needed}\label{sec:dual}
+\prereq{Section~\ref{sec:kernel}; weighted averages and outer products.}
+Partition of unity reproduces constants. Reproducing a linear position field
+also needs the first moment to agree with particle position.
+On one grid, write $x_p/\Delta x=b+d$, where b is the left node coordinate and
+$0\le d<1$. The weighted node coordinate is
+\[
+bw_0+(b+1)w_1=b+d-\frac{\sin(2\pi d)}{2\pi}.
+\]
+The last term is an error in linear reproduction, even though the weights sum
+to one.
+
+Use grids shifted by $-\Delta x/4$ and $+\Delta x/4$. Their local d values
+differ by half a cell modulo one. Since
+$\sin(2\pi(d+1/2))=-\sin(2\pi d)$, averaging the two first moments cancels
+the sine errors. Tensor-product weights extend this argument to each component
+in 3D. This is the key consistency role of the dual-grid construction in
+paper \S4.2.
+
+Define the combined weighted average
+\[
+\langle a\rangle_p=\frac12\sum_{k\in\{-1,+1\}}\sum_i w_{i,p,k}a_{i,k},
+\qquad \mat r_{i,p,k}=\mat x_{i,k}-\mat x_p.
+\]
+For a complete interior support,
+\begin{equation}\label{eq:moments}
+\langle1\rangle_p=1,\qquad \langle\mat r\rangle_p=\mat0,
+\qquad \mat D_p=\langle\mat r\mat r^T\rangle_p.
+\end{equation}
+For any vector z,
+$\mat z^T\mat D\mat z=\langle(\mat z\cdot\mat r)^2\rangle\ge0$.
+Thus D is positive semidefinite, and it is invertible if the positively
+weighted offsets span all spatial directions. It has units length squared.
+
+Each grid receives the full scattered mass. Summing both grid masses would
+count material twice; a physical total uses half their sum. Likewise the
+velocity and moment reconstruction use the combined average above.
+
+Boundary clipping can invalidate the complete-support identities. Our GPU
+checks therefore require transfer stencils to stay inside the grid. Applying
+a wall constraint to velocity also exerts a physical boundary impulse; momentum
+need not remain constant when gravity or walls act.
+\checkpoint{Sixteen grid nodes are not sixteen new sand grains. They are two
+sets of grid samples supporting the same material particle.}
+
+\section{Deriving the affine least-squares fit}\label{sec:apic}
+\prereq{Sections~\ref{sec:jacobian} and~\ref{sec:dual}.}
+Approximate a nearby velocity field by
+$\mat v(\mat x_p+\mat r)\approx\mat v_p+\mat C_p\mat r$.
+C describes spatial variation: a skew-symmetric C is rotation, a symmetric
+part describes stretching/shearing. APIC carries this variation through
+particle/grid transfer~\cite{apic}.
+
+Choose v and C to minimize the combined weighted residual
+\begin{equation}\label{eq:fit}
+E(\mat v,\mat C)=\tfrac12\langle\|\mat u_i-\mat v-\mat C\mat r_i\|^2\rangle.
+\end{equation}
+Differentiating with respect to v gives
+$\mat v=\langle\mat u\rangle-\mat C\langle\mat r\rangle
+=\langle\mat u\rangle$.
+Differentiating entry $C_{ab}$ gives
+\[
+0=-\langle(u_a-v_a-C_{aj}r_j)r_b\rangle.
+\]
+Using the zero first moment leaves the normal equations
+\begin{equation}\label{eq:affine-fit}
+\mat C\mat D=\mat B,\qquad
+\mat B=\langle\mat u\mat r^T\rangle,\qquad
+\boxed{\mat C=\mat B\mat D^{-1}}.
+\end{equation}
+These are the dual-grid D and B behind paper \S4.4 and Eqs.~(20)--(21).
+B has units length squared/time, so C has units inverse time.
+
+G2P uses offsets $\widehat{\mat r}=\mat r/\Delta x$ in cell units. With
+$\widehat{\mat B}=\sum w\mat u\widehat{\mat r}^{T}$ and
+$\widehat{\mat D}=\sum w\widehat{\mat r}\widehat{\mat r}^{T}$, it therefore computes
+\[
+\mat C=\frac1{\Delta x}\widehat{\mat B}\widehat{\mat D}^{-1}.
+\]
+The omitted halves cancel. Forgetting the division by $\Delta x$ would change
+the physical units and the amount of deformation.
+
+P2G then transfers $w m_p(\mat v_p+\mat C_p\mat r_i)$.
+For an exact affine field $\mat u_i=\mat a+\mat A\mat x_i$, the moment
+identities give $\mat v_p=\mat a+\mat A\mat x_p$ and $\mat C_p=\mat A$.
+This supplies an analytic test independent of another implementation.
+For rigid rotation around z,
+$\mat A=\left[\begin{smallmatrix}0&-\omega&0\\\omega&0&0\\0&0&0\end{smallmatrix}\right]$.
+The fitted field correctly sends opposite sides in opposite directions.
+
+\subsection{Where angular information is stored}
+The grid's angular momentum contribution of one affine particle expands to
+\[
+\langle(\mat x_p+\mat r)\times m_p(\mat v_p+\mat C_p\mat r)\rangle
+=\mat x_p\times m_p\mat v_p
+ +m_p\langle\mat r\times\mat C_p\mat r\rangle.
+\]
+The cross terms vanish by $\langle\mat r\rangle=0$. The second term is local
+spin information absent from a point-position/point-velocity pair. It depends
+on $\mat C\mat D=\mat B$. Measuring APIC angular momentum using only
+$\sum_p\mat x_p\times m_p\mat v_p$ omits this part.
+This expansion explains the mechanism, not a full floating-point conservation
+proof for our force/boundary/plasticity pipeline.
+
+\checkpoint{For a constant velocity field, B is zero because the first moment
+is zero, hence C is zero. For an affine field, the fit should recover C exactly
+in exact arithmetic with a complete support.}
+
+\section{MLS reconstruction and a convention audit}\label{sec:mls}
+\prereq{Sections~\ref{sec:weak} and~\ref{sec:apic}.}
+For a scalar field, fit $a_i\approx a_0+\mat q^T\mat r_i$ using the same
+weighted objective. The normal equations give
+$a_0=\langle a\rangle$ and
+$\mat q=\mat D^{-1}\langle\mat r a\rangle$.
+Reconstruct at a nearby point z while holding the fit center $\mat x_p$ fixed:
+\begin{align}
+a(\mat z)&\approx\tfrac12\sum_{k,i}N_{i,k}(\mat z)a_{i,k},\\
+N_{i,k}(\mat z)&=w_{i,p,k}
+ [1+(\mat z-\mat x_p)^T\mat D_p^{-1}\mat r_{i,p,k}],\label{eq:mls-shape}\\
+\nabla_zN_{i,k}(\mat x_p)&=w_{i,p,k}\mat D_p^{-1}\mat r_{i,p,k}.\label{eq:mls-gradient}
+\end{align}
+The weights and moment matrix are frozen while differentiating in z. Moving
+the fit center and differentiating its weights is a different operation.
+The block moment matrix for basis $(1,\mat r)$ is
+$\left[\begin{smallmatrix}1&0\\0&\mat D\end{smallmatrix}\right]$ because of
+\eqref{eq:moments}. This is the concrete linear-basis connection to the general
+MLS discussion in paper \S4.5~\cite{mls}.
+
+Substituting \eqref{eq:mls-gradient} into \eqref{eq:internal-integral} and using
+particle quadrature gives, in the column-vector convention of this guide,
+\begin{equation}\label{eq:mls-force}
+\boxed{\mat f_{i,k}^{\rm int}
+=-\sum_p V_{p,0}w_{i,p,k}\mat T_p\mat D_p^{-1}\mat r_{i,p,k}.}
+\end{equation}
+For dual-grid nodal variables, the half in the physical averaged reconstruction
+appears in both nodal mass and force. It cancels in the update when using the
+code's full per-grid mass storage. It does not change matrix multiplication
+order.
+
+\subsection{Keep the derived expression and source expression distinct}
+\label{sec:order-audit}
+The current shader and the inspected author CUDA source instead form
+\[
+\mat A_{\rm source}=m_p\mat C_p
+ -\Delta t\,V_{p,0}\mat D_p^{-1}\mat T_p,
+\qquad
+\mat q_{i,k}\mathrel{+}=w(m_p\mat v_p+\mat A_{\rm source}\mat r).
+\]
+The source puts $\mat D^{-1}$ on the left of T, while
+\eqref{eq:mls-force} places it on the right. These matrices are generally
+not interchangeable. For instance, in a 2D block,
+\[
+\mat D=\begin{pmatrix}2&0\\0&1\end{pmatrix},\quad
+\mat T=\begin{pmatrix}1&1\\1&2\end{pmatrix},\quad
+\mat D^{-1}\mat T=\begin{pmatrix}.5&.5\\1&2\end{pmatrix}
+\ne
+\mat T\mat D^{-1}=\begin{pmatrix}.5&1\\.5&2\end{pmatrix}.
+\]
+Symmetry of both factors does not make their product commute. The distinction
+can disappear for a scalar D, such as the interior quadratic B-spline moment
+$\mat D=(\Delta x^2/4)\mat I$, but CK moments need not be scalar matrices.
+
+\textbf{Audit boundary.} The paper-to-code document records what the code
+actually does. This derivation records what follows under our stated
+column-vector/gradient conventions. Resolving their difference needs an
+explicit tensor-index and force-path audit; agreement between references that
+share the source ordering is insufficient. This guide does not silently swap
+the code's factors or claim that the discrepancy is already resolved.
+
+Another independent distinction is paper Eq.~(17): its printed velocity
+transfer includes grid-mass/particle-mass factors, whereas our shader follows
+the author's CUDA average $\mat v_p=\langle\mat u\rangle$.
+That source comparison is not a derivation of equality to the printed equation.
+\checkpoint{The chain from Nanson through weak force to MLS is now complete.
+Which multiplication order does that chain give, and which does the source
+use? Keeping both answers visible is part of understanding the method.}
+
+\section{SVD, rotation and logarithmic stretch}\label{sec:svd}
+\prereq{Sections~\ref{sec:jacobian} and~\ref{sec:deformation}.}
+For an invertible deformation with positive determinant, $\mat F^T\mat F$ is
+symmetric positive definite. Its orthonormal eigenvectors form V and its
+positive eigenvalues are $s_a^2$. Define $\mat S=\diag(s_1,s_2,s_3)$ and
+$\mat U=\mat F\mat V\mat S^{-1}$. Then
+\[
+\mat U^T\mat U=\mat S^{-1}\mat V^T\mat F^T\mat F\mat V\mat S^{-1}=\mat I,
+\qquad \boxed{\mat F=\mat U\mat S\mat V^T}.
+\]
+This constructs the singular value decomposition from the spectral theorem for
+symmetric matrices. The values $s_a$ are principal stretches, not entries of F.
+The polar rotation is $\mat R=\mat U\mat V^T$ and the right stretch is
+$\mat V\mat S\mat V^T$. A rigid rotation has all $s_a=1$.
+
+For sequential one-dimensional stretches, multiplying stretch factors should
+add strain increments: $e(ab)=e(a)+e(b)$. With continuity and the small-strain
+normalization $e'(1)=1$, this motivates $e(s)=\log s$. Therefore define
+principal logarithmic strains $\epsilon_a=\log s_a$.
+Their trace is $\sum_a\epsilon_a=\log\prod_as_a=\log J$ when F is the total
+positive-determinant deformation.
+
+Split them into mean and shape-changing parts:
+\begin{equation}\label{eq:dev-strain}
+t=\epsilon_1+\epsilon_2+\epsilon_3,\quad
+\overline{\boldsymbol\epsilon}=\boldsymbol\epsilon-\tfrac t3\mat1,
+\quad \sum_a\overline\epsilon_a=0.
+\end{equation}
+The vector $\mat1=(1,1,1)^T$ here is not the identity matrix.
+The trace describes volume; differences among the strains describe distortion.
+
+\textbf{Worked check.} For $\mat F=\diag(2,1,.5)$,
+$\boldsymbol\epsilon=(\log2,0,-\log2)$ and $t=0$. It is volume-preserving but
+not strain-free. Setting strain equal to J alone would lose its shear energy.
+\checkpoint{SVD is used to expose stretches for the material model. It is not
+a separate particle-grid interaction rule.}
+
+\section{Deriving elastic stress from Hencky energy}\label{sec:energy}
+\prereq{Sections~\ref{sec:stress} and~\ref{sec:svd}.}
+A constitutive model specifies how deformation produces stress; MPM itself
+does not determine this law. For the elastic stretch energy used in the sand
+model, write an isotropic Hencky energy density
+\begin{equation}\label{eq:hencky}
+\Psi(\mat F)=\mu\sum_a\epsilon_a^2+\frac\lambda2
+                 \left(\sum_a\epsilon_a\right)^2.
+\end{equation}
+Stress is the energy derivative defined by
+$\delta\Psi=\mat P:\delta\mat F$.
+For a singular-value energy, the derivative has the principal form
+$\mat P=\mat U\diag(\partial\Psi/\partial s_a)\mat V^T$.
+Since $\partial\epsilon_a/\partial s_a=1/s_a$, ordinary differentiation gives
+\begin{align}
+\frac{\partial\Psi}{\partial s_a}&=
+    \frac{2\mu\epsilon_a+\lambda t}{s_a},\\
+\mat P&=\mat U\diag\!\left(\frac{2\mu\epsilon_a+\lambda t}{s_a}\right)\mat V^T,
+\label{eq:hencky-P}\\
+\mat T=\mat P\mat F^T
+&=\mat U\diag(2\mu\epsilon_a+\lambda t)\mat U^T.\label{eq:hencky-T}
+\end{align}
+For distinct stretches the principal derivative follows by differentiating
+$\mat F=\mat U\mat S\mat V^T$: rotational variations do not change an isotropic
+energy, leaving its diagonal stretch variation. Repeated positive stretches
+are interpreted by continuity; this is not permission to differentiate a
+particular numerical eigenvector sign convention.
+
+These equations explain the \code{pHat}, U, V and final multiplication by
+\code{transpose(F)} in \code{sandMaterial()}. With $s_a=1$, every logarithm is
+zero and the stress is zero even for a rigid rotation.
+
+\subsection{Why E and Poisson ratio lead to the Lame parameters}
+For small strains the same law linearizes to
+$\boldsymbol\sigma=2\mu\boldsymbol\varepsilon
++\lambda\tr(\boldsymbol\varepsilon)\mat I$.
+In uniaxial tension, take strains $(a,b,b)$ and zero lateral stresses. Then
+$2\mu b+\lambda(a+2b)=0$, so
+\[
+\nu=-b/a=\frac{\lambda}{2(\lambda+\mu)},\qquad
+E=\sigma_{11}/a=\frac{\mu(3\lambda+2\mu)}{\lambda+\mu}.
+\]
+Solving these two relations gives the formulas used in
+Section~\ref{sec:time} and \code{SimulationConfig::parameters()}:
+$\mu=E/[2(1+\nu)]$ and
+$\lambda=E\nu/[(1+\nu)(1-2\nu)]$.
+\checkpoint{Doubling E at fixed Poisson ratio doubles both elastic moduli;
+wave speed grows approximately by $\sqrt2$, reducing the acoustic step scale.}
+
+\section{Elastic/plastic deformation and the sand yield cone}\label{sec:plastic}
+\prereq{Sections~\ref{sec:svd} and~\ref{sec:energy}.}
+Elastic deformation can recover; plastic deformation changes the stress-free
+configuration. A common multiplicative description is
+\[
+\mat F^{\rm total}=\mat F^e\mat F^p.
+\]
+A trial update first holds plastic history fixed and evolves the elastic part:
+$\mat F^{e,\rm trial}=(\mat I+\Delta t\,\mat L)\mat F^{e,n}$.
+Return mapping then changes elastic stretches to satisfy a yield criterion.
+This is why the code updates F in G2P and corrects it in the material pass.
+
+The stored corrected matrix is an elastic state. Its determinant is not
+necessarily the total geometric J used in Nanson's formula and density
+conversion. The full plastic matrix need not be stored if the chosen stress
+update only needs the elastic state and selected history variables.
+
+Under the specific assumption that reference energy is $\Psi(\mat F^e)$ with
+$\mat F^p$ held fixed during elastic differentiation,
+\[
+\delta\mat F^e=\delta\mat F^{\rm total}(\mat F^p)^{-1},\qquad
+\mat P^{\rm total}=\mat P^e(\mat F^p)^{-T},\qquad
+\mat P^{\rm total}(\mat F^{\rm total})^T=\mat P^e(\mat F^e)^T.
+\]
+This explains how an elastic-stretch stress calculation can supply the
+Kirchhoff-like product used by the force path. Different plastic energy/volume
+conventions require their own constitutive derivation.
+
+\subsection{Pressure-dependent resistance to shear}
+Use tensile stress as positive. The compression-positive pressure is
+$p=-\tr\mat T/3$, and the deviatoric stress is
+$\mat T_{\rm dev}=\mat T-(\tr\mat T/3)\mat I$.
+A Drucker--Prager cone in the normalization used here is
+\begin{equation}\label{eq:DP}
+f(\mat T)=\|\mat T_{\rm dev}\|_F+\alpha\tr\mat T\le0.
+\end{equation}
+Equivalently the allowed shear norm is at most $3\alpha p$: compression raises
+shear resistance. At zero pressure a zero-cohesion cone supports no deviatoric
+stress. The implementation uses the friction-angle calibration
+\[
+\alpha=\sqrt{\frac23}\frac{2\sin\varphi}{3-\sin\varphi}.
+\]
+This calibration is a material-model convention, not a consequence of the MPM
+transfer kernel. Friction-angle calibrations vary with the chosen invariant
+normalization and fitting to a friction model. An internal material angle is
+not a universal sliding threshold for every object or boundary.
+
+From \eqref{eq:hencky-T}, the stress eigenvalues are $2\mu\epsilon_a+\lambda t$.
+Thus $\|\mat T_{\rm dev}\|_F=2\mu\|\overline{\boldsymbol\epsilon}\|$ and
+$\tr\mat T=(2\mu+3\lambda)t$. Dividing the yield function by $2\mu$ gives
+\begin{equation}\label{eq:strain-yield}
+\Delta\gamma=\|\overline{\boldsymbol\epsilon}\|
++\frac{3\lambda+2\mu}{2\mu}\alpha t.
+\end{equation}
+This derives the scalar expression seen in the return mapping when the
+auxiliary volume-history correction is zero.
+
+\subsection{Radial correction at compressive trace}
+For $t<0$ and $\Delta\gamma>0$, use a non-associated, trace-preserving plastic
+flow in the deviatoric direction:
+\begin{equation}\label{eq:radial}
+\boldsymbol\epsilon^{\rm new}
+=\boldsymbol\epsilon-\frac{\Delta\gamma}
+ {\|\overline{\boldsymbol\epsilon}\|}\overline{\boldsymbol\epsilon}.
+\end{equation}
+The trace stays t. The new deviatoric norm is
+$\|\overline{\boldsymbol\epsilon}\|-\Delta\gamma
+=-(3\lambda+2\mu)\alpha t/(2\mu)$, which is nonnegative under compression.
+Substitution into \eqref{eq:strain-yield} gives zero: the returned state lies
+on the cone. If $\Delta\gamma\le0$, the trial state is already admissible.
+For tensile/noncompressive trace, the source's zero-cohesion apex treatment
+sets elastic logarithmic stretches to zero. Then reconstruct
+\[
+s_a^{\rm new}=\exp(\epsilon_a^{\rm new}),\qquad
+\mat F^{e,\rm new}=\mat U\diag(s_a^{\rm new})\mat V^T.
+\]
+Zero logarithmic stretch gives a rotation $\mat U\mat V^T$, not necessarily
+an identity matrix. The general sand-model background is Kl\'ar et al.~\cite{sand}.
+\checkpoint{Return mapping is a projection of material state, not the G2P
+transfer. The transfer provides a trial deformation; plasticity decides which
+part of that deformation can remain elastic.}
+
+\section{The implemented volume-history correction}\label{sec:history}
+\prereq{Section~\ref{sec:plastic}; reading a branch condition.}
+The CK-MPM material overload adds a scalar history state named \code{logJp}.
+The shader uses this specific algorithm, with h denoting the old history:
+\begin{align*}
+\epsilon_a&=\log\max(|s_a|,10^{-4}),&
+s&=\sum_a\epsilon_a,& t_c&=s+h,\\
+\mat e&=\boldsymbol\epsilon-\tfrac{t_c}3\mat1,&
+q&=\|\mat e\|,& k&=\frac{3\lambda+2\mu}{2\mu}.
+\end{align*}
+If $t_c\ge0$, it sets $s_a^{\rm new}=1$ and updates $h^{\rm new}=h+s$.
+If $t_c<0$, it resets $h^{\rm new}=0$ and computes
+\[
+\Delta\gamma=q+k\alpha t_c,\qquad
+\mat H=\begin{cases}
+\boldsymbol\epsilon-(\Delta\gamma/\max(q,10^{-20}))\mat e,&\Delta\gamma>0,\\
+\boldsymbol\epsilon,&\Delta\gamma\le0,
+\end{cases}
+\qquad s_a^{\rm new}=e^{H_a}.
+\]
+The corrected elastic matrix and its stress are then stored.
+
+\textbf{Important distinction.} For nonzero old h,
+$\sum_a e_a=-h$, so e is not the ordinary traceless deviator from
+\eqref{eq:dev-strain}. The radial-return proof above establishes the zero-history
+case; it must not be presented as a proof of every volume-correction branch.
+This extension is traced directly to the author's
+\src{../CK-MPM/include/mpm_material.cuh} and implemented in
+\src{shaders/material.glsl}. A full physical derivation of that particular
+history rule requires the material-model conventions beyond the CK paper's
+kernel derivation. The guide states the algorithm rather than inventing one.
+
+Likewise, singular-value floors and denominator floors are numerical guards,
+not material laws. GPU finiteness checks do not prove positive total J,
+physical accuracy, constitutive admissibility in every corner case or stability
+of an arbitrary manually selected timestep.
+\checkpoint{When h is zero, e is the ordinary deviator and the cone derivation
+applies. When h is nonzero, identify exactly which quantity changed before
+reusing that proof.}
+
+\section{Trace the dependencies through one substep}\label{sec:trace}
+\prereq{All preceding branches; use the dependency map to revisit a missing link.}
+The runtime dispatches
+\[
+\text{clear}\to\text{P2G}\to\text{grid update}\to\text{G2P}\to\text{material update}.
+\]
+At the beginning of a step, each particle has position, velocity, elastic F,
+affine C, material stress and history. Corrected stress from the previous step
+feeds the current force scatter. The initial F is identity with zero stress.
+
+\begin{longtable}{p{.20\linewidth}p{.71\linewidth}}
+\toprule Stage & Mathematical ancestry and implementation \\\midrule\endhead
+Weights & Derivative smoothness $\to$ compact sine kernel $\to$ dual-grid moment consistency; \src{shaders/interpolation.glsl}. \\
+P2G & Particle quadrature plus affine least squares supplies mass and local momentum. Nanson $\to$ Piola stress $\to$ weak force $\to$ moment-based force approximation supplies the stress term, subject to Section~\ref{sec:order-audit}; \src{shaders/p2g.comp}. \\
+Grid update & Lumped mass $\to$ independent velocity normalization; explicit integration adds gravity and wall constraints; \src{shaders/grid_update.comp}. \\
+G2P & Dual-grid moment identities $\to$ B and D $\to$ fitted C; chain rule $\dot F=LF$ $\to$ elastic trial update; updated velocity $\to$ advection; \src{shaders/g2p.comp}. \\
+Material & SVD $\to$ logarithmic stretch $\to$ Hencky energy derivative $\to$ yield cone and return correction $\to$ stored stress/history; \src{shaders/material_update.comp}, \src{shaders/material.glsl}. \\
+Checks & Numerical diagnostics summarize finite state, domain/stencil validity and maximum speed; \src{shaders/particle_health.comp}. \\\bottomrule
+\end{longtable}
+
+\subsection{A worked symbolic path to the weak nodal force}
+The complete bridge that often gets compressed into one line is
+\begin{align*}
+\mat x=\boldsymbol\phi(\mat X)
+&\Rightarrow \mat F=\nabla_X\boldsymbol\phi,\ J=\det\mat F,\\
+(\mat F\mat a)\times(\mat F\mat b)
+&\Rightarrow \mat n\,\mathrm da=J\mat F^{-T}\mat N\,\mathrm dA,\\
+\mathrm d\mat f=\boldsymbol\sigma\mat n\,\mathrm da
+&\Rightarrow \mat P=J\boldsymbol\sigma\mat F^{-T},\\
+\rho_R\ddot{\boldsymbol\phi}=\Div\mat P+\rho_R\mat g
+&\Rightarrow \mat f_i^{\rm int}=-\int\mat P\nabla_X w_i\,\mathrm dV,\\
+\nabla_X w_i=\mat F^T\nabla_x w_i
+&\Rightarrow \mat f_i^{\rm int}=-\int\mat P\mat F^T\nabla_x w_i\,\mathrm dV,\\
+\int q\,\mathrm dV\approx\sum_pV_{p,0}q_p
+&\Rightarrow \mat f_i^{\rm int}\approx
+ -\sum_p V_{p,0}\mat P_p\mat F_p^T\nabla_x w_{i,p}.
+\end{align*}
+Every arrow now has a derivation above. CK changes the interpolation and dual-grid
+consistency; affine/MLS constructions change the transfer and gradient
+approximation. A constitutive law supplies P. These are connected but distinct
+pieces of the method.
+
+\subsection{Questions you should now be able to answer}
+\begin{enumerate}
+\item Why are F, J, P and $\boldsymbol\sigma$ different mathematical objects?
+\item Why does surface area require $J\mat F^{-T}$ rather than J alone?
+\item Which two transformations explain $\mat P\mat F^T$ in the weak force?
+\item Why do the compact weights need two shifted grids for linear reproduction?
+\item Why is $\mat C=\mat B\mat D^{-1}$ a fit rather than an arbitrary extra term?
+\item Which factors cancel when code accumulates unaveraged cell-unit moments?
+\item Which matrix ordering follows from the conventional MLS force derivation,
+      and which appears in the inspected source?
+\item Why does changing dt alter stability, while changing step count primarily
+      changes work per rendered frame?
+\item Why does sand need both an elastic stress law and a plastic correction?
+\item Why is a finite returned state not itself a proof of physical correctness?
+\end{enumerate}
+
+\section{Primary references and further study}
+The displayed calculations are explanatory derivations under stated assumptions.
+For the missing continuum bridge, start with the Nanson/stress references; for
+material-model details beyond the zero-history proof, follow the sand paper
+and the exact author overload cited above. The project reference tests check
+implementation behavior; they do not replace these mathematical arguments.
+
+\begin{thebibliography}{9}
+\bibitem{ck} M. Liu, X. Wang and M. Li.
+\emph{CK-MPM: A Compact-Kernel Material Point Method}. ACM TOG 44(4), 2025.
+\href{https://doi.org/10.1145/3731155}{doi:10.1145/3731155}.
+Local copy: \code{../../../CK-MPM Paper.pdf}.
+\bibitem{sandia} Sandia National Laboratories.
+\emph{Sierra/SM Theory Manual}, Chapter 7, Stress Measures, especially
+Nanson's Formula and First Piola--Kirchhoff Stress.
+\url{https://www.sandia.gov/files/sierra/SM_Theory_5_18/main/stress_measures.html}.
+\bibitem{nptel} NPTEL, Continuum Mechanics, Module 3, Lecture 19.
+\emph{Area and Volume Transformation}.
+\url{https://archive.nptel.ac.in/content/storage2/courses/112103167/module3/lec19.pdf}.
+\bibitem{alberta} University of Alberta, Engineering Courses.
+\emph{First and Second Piola Kirchhoff Stress Tensors}.
+\url{https://engcourses-uofa.ca/books/introduction-to-solid-mechanics/stress/first-and-second-piola-kirchhoff-stress-tensors/}.
+\bibitem{apic} C. Jiang et al.
+\emph{The Affine Particle-In-Cell Method}. ACM TOG, 2015.
+\href{https://doi.org/10.1145/2766996}{doi:10.1145/2766996}.
+\bibitem{mls} Y. Hu et al.
+\emph{A Moving Least Squares Material Point Method with Displacement
+Discontinuity and Two-Way Rigid Body Coupling}. ACM TOG, 2018.
+\href{https://doi.org/10.1145/3197517.3201293}{doi:10.1145/3197517.3201293}.
+\bibitem{sand} G. Kl\'ar et al.
+\emph{Drucker--Prager Elastoplasticity for Sand Animation}. ACM TOG, 2016.
+\href{https://doi.org/10.1145/2897824.2925906}{doi:10.1145/2897824.2925906}.
+\end{thebibliography}
+\end{document}

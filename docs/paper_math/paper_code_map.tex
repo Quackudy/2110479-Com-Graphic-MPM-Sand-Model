@@ -1,0 +1,201 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=24mm]{geometry}
+\usepackage{amsmath,amssymb,array,booktabs,longtable}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\src}[1]{\href{../../#1}{\nolinkurl{#1}}}
+\newcommand{\mat}[1]{\mathbf{#1}}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+\setlength{\emergencystretch}{2em}
+\renewcommand{\arraystretch}{1.18}
+\title{CK-MPM: Paper-to-Code Guide}
+\author{Vulkan sand implementation}
+\date{}
+\begin{document}
+\maketitle
+
+This guide connects the current implementation to Michael Liu, Xinlei Wang and
+Minchen Li, \emph{CK-MPM: A Compact-Kernel Material Point Method}, ACM TOG 44(4),
+2025, \href{https://doi.org/10.1145/3731155}{doi:10.1145/3731155}.
+Section and equation numbers below refer to that paper, not this guide.
+The local paper is \code{../../../CK-MPM Paper.pdf}.
+
+The implementation follows the author's affine CUDA transfer and sand material.
+A paper reference identifies the corresponding idea; differences from the
+printed equations are stated explicitly.
+
+Companion: \href{math_foundations.pdf}{\emph{Mathematical Foundations and Derivations}}
+starts with derivatives and Jacobians, derives Nanson's formula and the weak
+MPM force, then develops CK weights, APIC, MLS and sand plasticity.
+Source paths below are relative to the Vulkan project root.
+
+\section{Where to start}
+\begin{enumerate}
+\item \src{shaders/interpolation.glsl}: compact kernel, grid offsets, weights and moments.
+\item \src{shaders/g2p.comp}: fit affine velocity and update particles.
+\item \src{shaders/p2g.comp}: transfer mass, affine momentum and stress.
+\item \src{shaders/material.glsl}: sand stress and plastic correction.
+\item \src{src/simulation.cpp}, \code{Simulation::advance()}: dispatch order,
+      barriers and GPU timings.
+\end{enumerate}
+
+\section{Symbols and storage}
+\begin{longtable}{p{.23\linewidth}p{.20\linewidth}p{.47\linewidth}}
+\toprule Meaning & Notation & Code \\\midrule\endhead
+Particle position/velocity & $\mat{x}_p,\mat{v}_p$ & \code{position.xyz}, \code{velocity.xyz} \\
+Grid spacing/timestep & $\Delta x,\Delta t$ & \code{params.step.y}, \code{params.step.x} \\
+Particle mass/volume & $m_p,V_p$ & \code{params.step.z}, \code{params.step.w} \\
+Grid mass & $m_i$ & \code{nodes[i].w} \\
+Grid momentum/velocity & $m_i\mat{v}_i,\mat{v}_i$ & \code{nodes[i].xyz}; grid update changes momentum into velocity. \\
+Stored elastic deformation & $\mat{F}_p$ & \code{f0}, \code{f1}, \code{f2}: padded columns. \\
+First Piola stress & $\mat{P}_p$ & Evaluated in \code{sandMaterial()}; stored stress is $\mat{T}=\mat{P}\mat{F}^{T}$. \\
+Affine velocity & $\mat{C}_p=\mat{B}_p\mat{D}_p^{-1}$ & \code{c0}, \code{c1}, \code{c2}. \\
+Moment matrices & $\mat{B}_p,\mat{D}_p$ & Local \code{B}, \code{D} and \code{inverseMoment()}. \\
+Dual-grid weight & $w_{i,p,k}$ & \code{kernelWeight(o,w)}. \\
+Plastic volume history & $\log J_p$ & \code{plastic.x}, passed as \code{logJp}. \\\bottomrule
+\end{longtable}
+
+CPU layout: \src{src/simulation_config.hpp}, \code{Particle} and \code{Parameters}.
+Matching GPU layout and accessors: \src{shaders/mpm_common.glsl}.
+After plastic projection the stored F is an elastic state. The companion's
+elastic/plastic section distinguishes it from the full geometric deformation
+Jacobian used in Nanson's formula and density conversion.
+
+\section{Paper-to-code map}
+\begin{longtable}{p{.22\linewidth}p{.69\linewidth}}
+\toprule Paper & Implementation \\\midrule\endhead
+\S4.1, Eq.~(4) & \src{shaders/interpolation.glsl}, \code{interpolation()}: the sine-corrected compact 1D kernel. \\
+\S4.2, Eq.~(5) & \code{kernelWeight()} in the same file: product of the three axis weights. \\
+\S4.2, dual grids & \code{interpolation()}, \code{nodeOffset()} and \code{nodeIndex()} in \src{shaders/mpm_common.glsl}: shifts of $-\Delta x/4$ and $+\Delta x/4$ along each axis; eight nodes on each grid, sixteen total. \\
+\S4.3.1, Eq.~(12) & \src{shaders/p2g.comp}: atomic accumulation of $w m_p$ into grid mass on each grid. \\
+\S4.4.1, Eq.~(20) & Same shader: affine contribution $m_p\mat{C}_p\mat{r}_{i,p,k}$ accompanies particle translation. \\
+\S4.4.1, D before Eq.~(20) & \code{inverseMoment()} and \src{shaders/g2p.comp}: weighted offset outer products from both grids. \\
+\S4.4.2, Eq.~(21) & G2P: weighted velocity--offset outer products form B; C is obtained by multiplying by the inverse moment. \\
+\S4.3.2, Eq.~(14) & \src{shaders/material.glsl}, \code{sandMaterial()}: material stress after plastic correction; stores $\mat{P}\mat{F}^{T}$. Detailed return mapping comes from author source. \\
+\S4.3.2; \S4.5 & \src{shaders/p2g.comp}, \code{contribution}: author's moment-based stress transfer, not a literal kernel-gradient evaluation of Eq.~(15). \\
+\S4.3.3, Eq.~(16) & \src{shaders/grid_update.comp}: normalize momentum by mass, add gravity, apply sticky boundaries independently to each grid. Stress momentum has already entered during P2G. \\
+\S4.3.4 & G2P averages weighted velocities from both grids; the printed Eq.~(17) distinction is explained below. \\
+\S3.2; \S4.3.5, Eq.~(19) & G2P: deformation update using fitted C and advection using updated particle velocity. \\
+\S6.2, Sand Armadillos & \code{sandMaterial()}, \src{shaders/material_update.comp}, and \code{loadParticles()} in \src{src/simulation_config.cpp}: sand plasticity, armadillo assets and opposing velocities. \\
+\S5, implementation & \src{src/simulation.cpp}: separate Vulkan dispatches, barriers and timing queries. Storage and scheduling differ from the fused sparse CUDA implementation. \\\bottomrule
+\end{longtable}
+
+\section{Kernel and affine transfer equations}
+For a cell-local axis coordinate $d$ on a shifted grid,
+\begin{align*}
+w_0(d)&=1-d+\frac{\sin(2\pi d)}{2\pi}, & w_1(d)&=1-w_0(d),\\
+w_{xyz}&=w_xw_yw_z.
+\end{align*}
+This evaluates paper Eq.~(4) within the occupied cell and uses the
+partition-of-unity identity in Eq.~(8). The quadratic branch of
+\code{interpolation()} supplies the alternative B-spline kernel for comparison.
+
+Let $k\in\{-1,+1\}$ index the two grids, let
+$\mat{r}_{i,p,k}=\mat{x}_{i,k}-\mat{x}_p$ be a physical offset, and let
+$\mat{u}_{i,k}$ denote updated grid velocity. Then
+\begin{align*}
+\mat{D}_p&=\frac12\sum_k\sum_i w_{i,p,k}\,
+                 \mat{r}_{i,p,k}\mat{r}_{i,p,k}^{T},\\
+\mat{B}_p&=\frac12\sum_k\sum_i w_{i,p,k}\,
+                 \mat{u}_{i,k}\mat{r}_{i,p,k}^{T},\\
+\mat{C}_p&=\mat{B}_p\mat{D}_p^{-1}.
+\end{align*}
+G2P omits both factors of $1/2$ because they cancel in the fit. Its offsets
+are measured in cell units, so the code computes
+\[
+\mat{C}_p=\frac{1}{\Delta x}\,
+          \widehat{\mat{B}}_p\widehat{\mat{D}}_p^{-1}.
+\]
+\code{inverseMoment()} returns the inverse of the averaged D in physical units,
+evaluated at the current particle position for P2G.
+
+The P2G shader combines affine momentum and stress:
+\begin{align*}
+\mat{T}_p&=\mat{P}_p\mat{F}_p^{T},\\
+\mat{A}_p&=m_p\mat{C}_p-\Delta t\,V_p\mat{D}_p^{-1}\mat{T}_p,\\
+\mat{q}_{i,k}&\mathrel{+}=w_{i,p,k}
+                (m_p\mat{v}_p+\mat{A}_p\mat{r}_{i,p,k}),\\
+m_{i,k}&\mathrel{+}=w_{i,p,k}m_p.
+\end{align*}
+Here $\mat{q}$ is grid momentum. In particular, D inverse multiplies T on the
+\emph{left}, matching \code{contribution} in the author's
+\src{../CK-MPM/include/mpm_algorithm.cuh}, \code{G2P2G()}.
+The companion's section ``MLS reconstruction and a convention audit'' derives
+the conventional column-vector force ordering $\mat{T}\mat{D}^{-1}\mat{r}$.
+That order differs from the source ordering shown above in general. A shared
+code/reference result does not resolve this mathematical difference; keep it
+as an explicit audit point rather than asserting equivalence.
+
+The MLS shape functions in paper Eqs.~(22)--(25) explain the moment-based
+approach; our code uses the author's concrete formulation rather than building
+a general polynomial basis.
+
+Particle velocity and deformation use
+\begin{align*}
+\mat{v}_p^{n+1}&=\frac12\sum_k\sum_i w_{i,p,k}\mat{u}_{i,k},\\
+\mat{F}_p^{\mathrm{trial}}&=(\mat{I}+\Delta t\,\mat{C}_p)\mat{F}_p^n,\\
+\mat{x}_p^{n+1}&=\mat{x}_p^n+\Delta t\,\mat{v}_p^{n+1}.
+\end{align*}
+The velocity average follows the author's CUDA loop. \textbf{Printed paper
+Eq.~(17) includes grid-mass/particle-mass factors that this shader does not
+use.} The mapping to \S4.3.4 is conceptual, not a claim of literal equality to
+that printed equation. Fitted C supplies the deformation update instead of
+explicitly summing the kernel derivatives in Eq.~(18).
+
+\section{Sand model and source provenance}
+The paper identifies Drucker--Prager sand and its example parameters in \S6.2.
+Detailed SVD and return mapping are traced to
+\src{../CK-MPM/include/mpm_material.cuh},
+\code{ComputeStress<kDruckerPragerStvkhencky>}, and its callers in
+\src{../CK-MPM/include/mpm_algorithm.cuh}.
+
+In \src{shaders/material.glsl}, \code{svd3()} factors F using one-sided Jacobi
+sweeps. \code{sandMaterial()} evaluates logarithmic stretches, projects plastic
+strain, updates $\log J_p$, reconstructs F and evaluates stress.
+\src{shaders/material_update.comp} stores corrected deformation, stress and
+plastic history. Friction angle is configurable; the corresponding author CUDA
+overload fixes its yield coefficient at $30^\circ$.
+
+The paper's example uses 511,902 particles, $E=10^4$, $\nu=0.4$, friction angle
+$30^\circ$ and gravity $-2$. JSON settings can differ. \code{loadParticles()}
+uses the author assets with initial velocities $(0,0,-0.5)$ and $(0,0,0.5)$;
+\code{parameters()} rescales mass/volume when sampling fewer particles.
+
+\section{Execution and implementation choices}
+\code{Simulation::advance()} dispatches each substep in this order:
+\[
+\text{clear}\longrightarrow\text{P2G}\longrightarrow\text{grid update}
+\longrightarrow\text{G2P}\longrightarrow\text{material/plastic update}.
+\]
+Corrected stress at the end of a substep feeds the next P2G. Initial F is
+identity and stored stress is zero. Advection and the elastic deformation
+update occur inside G2P.
+
+Unlike the fused G2P2G and blocked sparse AoSoA storage in \S5.1, this code uses
+separate passes, a dense grid, padded particle structs and direct global
+atomics. These differences matter when comparing performance.
+
+Automatic acoustic stepping is in \code{SimulationConfig::timestep()}.
+Offline scheduling also limits particle travel. Manual live stepping in
+\code{live()} uses positive dt and \code{steps_per_frame} directly; these are
+application controls, not stability or real-time guarantees from the paper.
+
+\section{Tests and application infrastructure}
+Paper \S6.1 studies full momentum-conservation experiments, and \S6.2 compares
+kernels. Our \src{tools/evaluate.py} checks small NumPy stage fixtures,
+analytic affine fields, two-step state reuse and GPU safety reductions.
+\src{tools/taichi_reference.py} is an affine stage reference, while
+\src{tools/cuda_material_reference.cu} executes the author's material/SVD.
+These checks do not reproduce the full paper experiments.
+
+\begin{longtable}{p{.45\linewidth}p{.46\linewidth}}
+\toprule Source & Application role \\\midrule\endhead
+\src{shaders/particle_health.comp}, \code{Simulation::health()} & GPU finite-state, domain/stencil and maximum-speed reduction. \\
+\src{src/renderer.cpp}, \src{shaders/particle.vert}, \src{shaders/particle.frag} & Particle spheres, camera rendering and direct reads of live GPU particle state. \\
+\src{src/vulkan_context.cpp} & Vulkan memory, command submission, presentation and validation. \\
+\src{src/scene_cache.cpp}, \code{calculate()}/\code{play()} in \src{src/main.cpp} & Save sampled particle positions and replay them. \\\bottomrule
+\end{longtable}
+\end{document}

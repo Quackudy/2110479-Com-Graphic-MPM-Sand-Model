@@ -5,8 +5,8 @@ rendering. Both live simulation and offline calculation use affine transfer
 following the author's CUDA G2P2G implementation, with Drucker–Prager /
 StVK-Hencky sand material.
 
-See [PAPER_CODE_MAP.md](PAPER_CODE_MAP.md) for the connection between paper
-sections/equations and the solver source.
+See [docs/paper_math](docs/paper_math/README.md) for the paper-to-code map and
+the mathematics learning guide, including derivations and prerequisite maps.
 
 ## Requirements
 
