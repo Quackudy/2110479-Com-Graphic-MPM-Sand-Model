@@ -3,3 +3,5 @@
 /output/
 /.venv-reference/
 **/__pycache__/
+
+AI_USE.md

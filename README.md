@@ -5,6 +5,9 @@ rendering. Both live simulation and offline calculation use affine transfer
 following the author's CUDA G2P2G implementation, with Drucker–Prager /
 StVK-Hencky sand material.
 
+See [PAPER_CODE_MAP.md](PAPER_CODE_MAP.md) for the connection between paper
+sections/equations and the solver source.
+
 ## Requirements
 
 - C++20 compiler, CMake 3.21+, Vulkan 1.3 SDK and `glslc`.
