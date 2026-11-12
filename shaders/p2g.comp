@@ -1,0 +1,30 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_shader_atomic_float : require
+#include "mpm_common.glsl"
+#include "interpolation.glsl"
+layout(local_size_x=128) in;
+void main() {
+    uint p=gl_GlobalInvocationID.x;
+    if (p>=params.dims.x) return;
+    Particle particle=particles[p];
+    // Match the author CUDA G2P2G force convention: D inverse multiplies stress on the left.
+    mat3 contribution=params.step.z*affine(particle)
+        -params.step.x*params.step.w*inverseMoment(particle.position.xyz)*stress(particle);
+    uint grids=params.dims.z == 0 ? 2 : 1;
+    int radius=params.dims.z == 0 ? 2 : 3;
+    for (uint g=0; g<grids; ++g) {
+        ivec3 base; mat3 w;
+        interpolation(particle.position.xyz,g,base,w);
+        for (int z=0;z<radius;++z) for (int y=0;y<radius;++y) for (int x=0;x<radius;++x) {
+            ivec3 o=ivec3(x,y,z), cell=base+o;
+            if (!validNode(cell)) continue;
+            float weight=kernelWeight(o,w);
+            vec3 r=params.step.y*nodeOffset(particle.position.xyz,cell,g);
+            vec3 momentum=weight*(params.step.z*particle.velocity.xyz+contribution*r);
+            uint i=nodeIndex(cell,g);
+            atomicAdd(nodes[i].x,momentum.x); atomicAdd(nodes[i].y,momentum.y); atomicAdd(nodes[i].z,momentum.z);
+            atomicAdd(nodes[i].w,weight*params.step.z);
+        }
+    }
+}

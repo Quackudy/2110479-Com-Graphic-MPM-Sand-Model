@@ -1,0 +1,46 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "mpm_common.glsl"
+layout(local_size_x=128) in;
+layout(std430, set=0, binding=2) buffer Health { uvec4 result; };
+shared uint speeds[128], errors[128], badParticles[128];
+void main() {
+    uint p=gl_GlobalInvocationID.x, lane=gl_LocalInvocationID.x;
+    uint flags=0, speed=0;
+    if (p<params.dims.x) {
+        Particle v=particles[p];
+        vec4 fields[12]=vec4[](v.position,v.velocity,v.f0,v.f1,v.f2,v.s0,v.s1,v.s2,
+                              v.plastic,v.c0,v.c1,v.c2);
+        for (int i=0;i<12;++i)
+            if (any(isnan(fields[i])) || any(isinf(fields[i]))) flags|=1u;
+        float magnitude=length(v.velocity.xyz);
+        if (isnan(magnitude) || isinf(magnitude)) flags|=1u;
+        else speed=floatBitsToUint(magnitude);
+        if (any(lessThan(v.position.xyz,vec3(0))) || any(greaterThan(v.position.xyz,vec3(1))))
+            flags|=2u;
+        if ((flags&3u)==0u) {
+            bool ck=params.dims.z==0;
+            vec3 x=v.position.xyz*float(params.dims.y);
+            ivec3 low=ivec3(floor(x-(ck ? .25 : .5)));
+            ivec3 high=ivec3(floor(x+(ck ? .25 : -.5)))+(ck ? 1 : 2);
+            if (!validNode(low) || !validNode(high)) flags|=4u;
+        }
+    }
+    speeds[lane]=speed;
+    errors[lane]=flags;
+    badParticles[lane]=flags!=0u ? p : 0xffffffffu;
+    barrier();
+    for (uint stride=64;stride>0;stride>>=1) {
+        if (lane<stride) {
+            speeds[lane]=max(speeds[lane],speeds[lane+stride]);
+            errors[lane]|=errors[lane+stride];
+            badParticles[lane]=min(badParticles[lane],badParticles[lane+stride]);
+        }
+        barrier();
+    }
+    if (lane==0) {
+        atomicMax(result.x,speeds[0]);
+        atomicOr(result.y,errors[0]);
+        atomicMin(result.z,badParticles[0]);
+    }
+}

@@ -1,0 +1,21 @@
+
+MANUAL LIVE STEPPING (SUPERSEDES TARGET/BUDGET MODE)
+Per user instruction live now uses configured dt and steps_per_frame exactly.
+Removed time_scale, physics_budget_ms, adaptive batch derivation and hidden
+travel/CFL clamping for positive manual live dt. Automatic dt=0 remains.
+Periodic/final stdout gives dt, steps/frame, sim seconds/frame, FPS and speed.
+Mailbox selected here; immediate/FIFO are platform fallbacks.
+400,000 particles, dt=.0004, 3 steps/frame, 180 rendered frames: 64.57 FPS,
+.0776x speed, .0012 sim seconds/frame. All six CTests, live invariants/cache
+checks and raster/RT regression passed with clean validation. Larger manual
+dt settings are accepted in live but stability is not guaranteed.
+
+OBSOLETE CODE CLEANUP
+Surface extraction/cache/ray-lighting and unused template/scene helpers were
+removed, along with dead PIC weight derivatives. Production solver remains
+affine; play now renders affine particle recordings only and rejects the
+existing old PIC recording without deleting it. Three retained CTests, the
+180-frame live smoke and 120-frame saved-particle rendering fixture passed
+with clean validation. Current test used 80,000 particles/.0004 dt/25 steps
+per frame and measured ~62 FPS/.623x. Earlier surface/PIC benchmark entries
+above are historical measurements, not available runtime modes.

@@ -1,7 +1,9 @@
 #pragma once
-#include <vulkan/vulkan_raii.hpp>
 #include <array>
+#include <atomic>
+#include <filesystem>
 #include <vector>
+#include <vulkan/vulkan_raii.hpp>
 
 struct GLFWwindow;
 
@@ -14,27 +16,42 @@ struct Buffer {
 // SETUP ONLY: device, allocation/upload, render targets, and frame synchronization.
 // The application's GLFW window must outlive this context.
 class VulkanContext {
-public:
-    explicit VulkanContext(GLFWwindow* window);
+  public:
+    explicit VulkanContext(GLFWwindow *window = nullptr, bool compute = false, bool uncapped = false);
     ~VulkanContext();
-    VulkanContext(const VulkanContext&) = delete;
-    VulkanContext& operator=(const VulkanContext&) = delete;
-    Buffer createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties);
-    void writeBuffer(Buffer& buffer, const void* data, vk::DeviceSize size);
-    Buffer uploadBuffer(const void* data, vk::DeviceSize size, vk::BufferUsageFlagBits usage);
-    bool beginFrame(const std::array<float, 4>& background);
+    VulkanContext(const VulkanContext &) = delete;
+    VulkanContext &operator=(const VulkanContext &) = delete;
+    Buffer createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage,
+                        vk::MemoryPropertyFlags properties);
+    void writeBuffer(Buffer &buffer, const void *data, vk::DeviceSize size);
+    bool beginFrame(const std::array<float, 4> &background);
     void endFrame();
+    void beginRendering(const std::array<float, 4> &background);
+    void beginCommands();
+    void submitAndWait();
+    void readBuffer(const Buffer &buffer, void *data, vk::DeviceSize size);
+    vk::raii::ShaderModule loadShader(const std::filesystem::path &path);
+    vk::PhysicalDeviceProperties properties() const { return gpu.getProperties(); }
+    uint32_t timestampBits() const {
+        return gpu.getQueueFamilyProperties()[queueFamily].timestampValidBits;
+    }
+    uint32_t validationMessages() const { return validationCount.load(); }
+    bool validationEnabled() const { return validation; }
+    bool syncValidationEnabled() const { return syncValidation; }
+    std::atomic<uint32_t> validationCount{0};
 
-    vk::raii::Device& device() { return device_; }
-    vk::raii::CommandBuffer& command() { return command_; }
-    const vk::Extent2D& extent() const { return extent_; }
+    vk::raii::Device &device() { return device_; }
+    vk::raii::CommandBuffer &command() { return command_; }
+    const vk::Extent2D &extent() const { return extent_; }
     vk::Format colorFormat() const { return format; }
     vk::Format depthFormat() const { return depthFormat_; }
     vk::SampleCountFlagBits sampleCount() const { return samples_; }
     uint64_t swapchainGeneration() const { return swapchainGeneration_; }
 
-private:
-    GLFWwindow* window;
+  private:
+    GLFWwindow *window;
+    bool compute;
+    bool uncapped;
     vk::raii::Context context;
     vk::raii::Instance instance = nullptr;
     vk::raii::DebugUtilsMessengerEXT messenger = nullptr;

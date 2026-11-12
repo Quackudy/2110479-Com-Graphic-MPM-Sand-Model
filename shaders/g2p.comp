@@ -1,0 +1,36 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "mpm_common.glsl"
+#include "interpolation.glsl"
+layout(local_size_x=128) in;
+void main() {
+    uint p=gl_GlobalInvocationID.x;
+    if (p>=params.dims.x) return;
+    Particle particle=particles[p];
+    uint grids=params.dims.z == 0 ? 2 : 1;
+    int radius=params.dims.z == 0 ? 2 : 3;
+    vec3 velocity=vec3(0); mat3 B=mat3(0), D=mat3(0);
+    for (uint g=0;g<grids;++g) {
+        ivec3 base; mat3 w;
+        interpolation(particle.position.xyz,g,base,w);
+        for (int z=0;z<radius;++z) for (int y=0;y<radius;++y) for (int x=0;x<radius;++x) {
+            ivec3 o=ivec3(x,y,z), cell=base+o;
+            if (!validNode(cell)) continue;
+            float weight=kernelWeight(o,w);
+            vec3 u=nodes[nodeIndex(cell,g)].xyz;
+            velocity+=weight*u;
+            vec3 r=nodeOffset(particle.position.xyz,cell,g);
+            B+=outerProduct(u,weight*r);
+            D+=outerProduct(r,weight*r);
+        }
+    }
+    float average=1.0/float(grids);
+    velocity*=average;
+    mat3 C=B*inverse(D)/params.step.y;
+    mat3 F=(mat3(1)+params.step.x*C)*deformation(particle);
+    particle.position.xyz+=params.step.x*velocity;
+    particle.velocity.xyz=velocity;
+    particle.f0=vec4(F[0],0); particle.f1=vec4(F[1],0); particle.f2=vec4(F[2],0);
+    particle.c0=vec4(C[0],0); particle.c1=vec4(C[1],0); particle.c2=vec4(C[2],0);
+    particles[p]=particle;
+}

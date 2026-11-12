@@ -3,50 +3,36 @@
 #include "vulkan_context.hpp"
 #include <filesystem>
 
-// RENDERING: uploads meshes and draws scene objects; no application/animation loop.
+// Draw saved or GPU-resident particles; the application owns frame submission.
 class Renderer {
-public:
-    Renderer(GLFWwindow* window, const std::filesystem::path& shaderDirectory, const scene::Scene& scene);
+  public:
+    Renderer(VulkanContext &context, const std::filesystem::path &shaders, uint32_t particles,
+             float radius, float floorHeight, const Buffer *liveParticles = nullptr);
     ~Renderer();
-    Renderer(const Renderer&) = delete;
-    Renderer& operator=(const Renderer&) = delete;
-    void draw(const scene::Scene& scene);
+    void setFrames(const std::vector<float> &a, const std::vector<float> &b);
+    void prepareFrame();
+    size_t particleBufferBytes() const { return currentCapacity + nextCapacity; }
+    void draw(const scene::Camera &camera, float alpha);
 
-private:
-    VulkanContext context; // must outlive all renderer resources
-    std::filesystem::path shaderDirectory;
-    struct GpuMesh {
-        Buffer vertices;
-        Buffer indices;
-        uint32_t indexCount;
+  private:
+    VulkanContext &context;
+    std::filesystem::path shaders;
+    uint32_t count;
+    float radius, floorHeight;
+    bool liveParticleMode = false;
+    struct alignas(16) Frame {
+        glm::mat4 view, projection;
+        glm::vec4 playback;
     };
-    // Match FrameUniforms in both shaders (std140).
-    struct alignas(16) FrameUniforms {
-        glm::mat4 view;
-        glm::mat4 projection;
-        float elapsedTime;
-    };
-    static_assert(offsetof(FrameUniforms, view) == 0);
-    static_assert(offsetof(FrameUniforms, projection) == 64);
-    static_assert(offsetof(FrameUniforms, elapsedTime) == 128);
-    static_assert(sizeof(FrameUniforms) == 144);
-
-    struct SDFUniforms {
-        float sphere_pos;
-        float sphere_size;
-    };
-
-    std::vector<GpuMesh> meshes;
-    Buffer uniformBuffer;
-    vk::raii::DescriptorSetLayout descriptorLayout = nullptr;
-    vk::raii::DescriptorPool descriptorPool = nullptr;
-    vk::raii::DescriptorSet descriptorSet = nullptr;
+    static_assert(sizeof(Frame) == 144);
+    Buffer uniformBuffer, current, next;
+    size_t currentCapacity = 0, nextCapacity = 0;
+    vk::raii::DescriptorSetLayout descriptors = nullptr;
+    vk::raii::DescriptorPool pool = nullptr;
+    vk::raii::DescriptorSet set = nullptr;
     vk::raii::PipelineLayout layout = nullptr;
     vk::raii::Pipeline pipeline = nullptr;
-    uint64_t pipelineGeneration = 0;
-
-    void createSceneResources(const scene::Scene& scene);
-    vk::raii::ShaderModule loadModule(const char* filename);
-    void createPipeline();
-    void recordSceneDraw(const scene::Scene& scene);
+    uint64_t generation = 0;
+    void createPipelines();
+    vk::raii::Pipeline createPipeline();
 };

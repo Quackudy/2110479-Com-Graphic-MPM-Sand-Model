@@ -1,0 +1,17 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "mpm_common.glsl"
+layout(local_size_x=128) in;
+void main() {
+    uint i=gl_GlobalInvocationID.x, n=params.dims.y;
+    if (i>=params.dims.w) return;
+    vec3 velocity=vec3(0);
+    if (nodes[i].w>params.sand.y) {
+        velocity=nodes[i].xyz/nodes[i].w;
+        velocity.y+=params.step.x*params.material.z;
+    }
+    ivec3 c=ivec3(i%n,(i/n)%n,(i/(n*n))%n);
+    float b=params.material.w;
+    if (any(lessThan(vec3(c),vec3(b))) || any(greaterThanEqual(vec3(c),vec3(n)-b))) velocity=vec3(0);
+    nodes[i].xyz=velocity;
+}

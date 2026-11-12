@@ -1,0 +1,15 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "mpm_common.glsl"
+#include "material.glsl"
+layout(local_size_x=128) in;
+void main() {
+    uint p=gl_GlobalInvocationID.x;
+    if (p>=params.dims.x) return;
+    Particle particle=particles[p];
+    mat3 F=deformation(particle), PF;
+    sandMaterial(F,particle.plastic.x,PF);
+    particle.f0=vec4(F[0],0); particle.f1=vec4(F[1],0); particle.f2=vec4(F[2],0);
+    particle.s0=vec4(PF[0],0); particle.s1=vec4(PF[1],0); particle.s2=vec4(PF[2],0);
+    particles[p]=particle;
+}
