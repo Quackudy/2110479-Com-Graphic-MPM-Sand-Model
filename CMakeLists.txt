@@ -1,9 +1,20 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.24)
 project(ck_mpm_vulkan_starter LANGUAGES CXX)
 
 find_package(Vulkan 1.3 REQUIRED)
-find_package(glfw3 3.3 REQUIRED)
-find_package(glm CONFIG REQUIRED)
+
+# Prefer system packages; download pinned versions only when they are missing.
+include(FetchContent)
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(glfw3 GIT_REPOSITORY https://github.com/glfw/glfw.git
+  GIT_TAG 3.4 GIT_SHALLOW TRUE FIND_PACKAGE_ARGS 3.3 NAMES glfw3)
+FetchContent_Declare(glm GIT_REPOSITORY https://github.com/g-truc/glm.git
+  GIT_TAG 1.0.1 GIT_SHALLOW TRUE FIND_PACKAGE_ARGS CONFIG)
+FetchContent_Declare(nlohmann_json GIT_REPOSITORY https://github.com/nlohmann/json.git
+  GIT_TAG v3.11.3 GIT_SHALLOW TRUE FIND_PACKAGE_ARGS 3.10)
+FetchContent_MakeAvailable(glfw3 glm nlohmann_json)
 find_program(GLSLC glslc REQUIRED)
 find_program(EVALUATION_PYTHON NAMES python3 HINTS /usr/bin REQUIRED)
 
@@ -18,7 +29,6 @@ foreach(NAME IN LISTS SHADER_NAMES)
   list(APPEND SHADERS ${CMAKE_CURRENT_BINARY_DIR}/${NAME}.spv)
 endforeach()
 
-find_package(nlohmann_json 3.10 REQUIRED)
 add_executable(ck_mpm_starter src/main.cpp src/renderer.cpp src/vulkan_context.cpp src/scene.cpp
   src/simulation_config.cpp src/simulation.cpp src/scene_cache.cpp src/platform.cpp ${SHADERS})
 target_link_libraries(ck_mpm_starter PRIVATE nlohmann_json::nlohmann_json)

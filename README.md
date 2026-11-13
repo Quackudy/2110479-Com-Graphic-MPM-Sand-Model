@@ -10,8 +10,11 @@ the mathematics learning guide, including derivations and prerequisite maps.
 
 ## Requirements
 
-- C++20 compiler, CMake 3.21+, Vulkan 1.3 SDK and `glslc`.
-- GLFW 3.3+, GLM and nlohmann/json 3.10+.
+- C++20 compiler, CMake 3.24+, Vulkan 1.3 SDK and `glslc`.
+- GLFW 3.3+, GLM and nlohmann/json 3.10+. CMake uses installed packages when
+  found (Arch: `pacman -S glfw glm nlohmann-json`); otherwise it downloads
+  pinned versions (GLFW 3.4, GLM 1.0.1, nlohmann/json 3.11.3) at configure
+  time, which needs network access and Git.
 - GPU supporting Vulkan buffer float32 atomic addition and GPU timestamps.
 - Python 3 with NumPy for numerical checks.
 - A desktop display for interactive viewing; Khronos validation layers for
@@ -27,10 +30,10 @@ Windows variants), but the Windows path has not been built yet. `run.sh` needs
 bash, so until a cross-platform launcher exists use these steps in a Developer
 PowerShell for Visual Studio:
 
-1. Install Visual Studio Build Tools (C++ workload), CMake, Git with Git LFS,
+1. Install Visual Studio Build Tools (C++ workload), CMake 3.24+, Git with Git LFS,
    Python 3 and the LunarG Vulkan SDK (provides `glslc` and the validation layers).
-2. Install the libraries with [vcpkg](https://vcpkg.io): `vcpkg install glfw3 glm nlohmann-json`.
-3. Fetch the assets (skip the author's nested submodules):
+   GLFW, GLM and nlohmann/json are downloaded automatically by CMake.
+2. Fetch the assets (skip the author's nested submodules):
 
 ```powershell
 $env:GIT_LFS_SKIP_SMUDGE = 1
@@ -38,10 +41,10 @@ git submodule update --init third_party/CK-MPM
 git -C third_party/CK-MPM lfs pull --include="asset/particle_data/sand_armadillo_0_jittered.bin,asset/particle_data/sand_armadillo_1_jittered.bin"
 ```
 
-4. Configure and build:
+3. Configure and build:
 
 ```powershell
-cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+cmake -S . -B build
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
