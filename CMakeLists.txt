@@ -20,7 +20,7 @@ endforeach()
 
 find_package(nlohmann_json 3.10 REQUIRED)
 add_executable(ck_mpm_starter src/main.cpp src/renderer.cpp src/vulkan_context.cpp src/scene.cpp
-  src/simulation_config.cpp src/simulation.cpp src/scene_cache.cpp ${SHADERS})
+  src/simulation_config.cpp src/simulation.cpp src/scene_cache.cpp src/platform.cpp ${SHADERS})
 target_link_libraries(ck_mpm_starter PRIVATE nlohmann_json::nlohmann_json)
 target_compile_definitions(ck_mpm_starter PRIVATE
   PROJECT_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -58,7 +58,7 @@ if(NVCC AND EXISTS ${AUTHOR_DIR}/include/mpm_material.cuh)
 endif()
 
 if(BUILD_TESTING)
-  add_executable(cache_test tests/cache_test.cpp src/scene_cache.cpp src/simulation_config.cpp)
+  add_executable(cache_test tests/cache_test.cpp src/scene_cache.cpp src/simulation_config.cpp src/platform.cpp)
   target_compile_features(cache_test PRIVATE cxx_std_20)
   target_include_directories(cache_test PRIVATE src)
   target_link_libraries(cache_test PRIVATE glm::glm nlohmann_json::nlohmann_json)

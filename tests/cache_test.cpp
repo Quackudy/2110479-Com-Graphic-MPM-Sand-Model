@@ -2,7 +2,7 @@
 #include <iostream>
 #include <fstream>
 #include <limits>
-#include <unistd.h>
+#include "platform.hpp"
 
 void require(bool ok, const char *message) {
     if (!ok)
@@ -18,7 +18,7 @@ template <class F> void rejects(F function) {
 }
 int main() {
     auto directory =
-        std::filesystem::temp_directory_path() / ("ck-cache-test-" + std::to_string(getpid()));
+        std::filesystem::temp_directory_path() / ("ck-cache-test-" + std::to_string(platform::processId()));
     std::filesystem::create_directories(directory);
     try {
         auto path = directory / "scene.bin";

@@ -20,6 +20,36 @@ the mathematics learning guide, including derivations and prerequisite maps.
   `third_party/CK-MPM`; `run.sh` fetches it and only the two sand-armadillo
   particle files it needs.
 
+## Windows (experimental, not yet tested)
+
+The C++ sources avoid POSIX-only calls (`src/platform.cpp` holds the Linux and
+Windows variants), but the Windows path has not been built yet. `run.sh` needs
+bash, so until a cross-platform launcher exists use these steps in a Developer
+PowerShell for Visual Studio:
+
+1. Install Visual Studio Build Tools (C++ workload), CMake, Git with Git LFS,
+   Python 3 and the LunarG Vulkan SDK (provides `glslc` and the validation layers).
+2. Install the libraries with [vcpkg](https://vcpkg.io): `vcpkg install glfw3 glm nlohmann-json`.
+3. Fetch the assets (skip the author's nested submodules):
+
+```powershell
+$env:GIT_LFS_SKIP_SMUDGE = 1
+git submodule update --init third_party/CK-MPM
+git -C third_party/CK-MPM lfs pull --include="asset/particle_data/sand_armadillo_0_jittered.bin,asset/particle_data/sand_armadillo_1_jittered.bin"
+```
+
+4. Configure and build:
+
+```powershell
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+```
+
+Known gaps: `CMakeLists.txt` looks for `python3`, which Windows usually lacks, and
+`tools/evaluate.py` looks for `.venv-reference/bin/python` instead of
+`Scripts/python.exe`.
+
 ## Run
 
 Run commands from this folder. `run.sh` configures and builds the application
