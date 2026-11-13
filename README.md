@@ -20,60 +20,43 @@ the mathematics learning guide, including derivations and prerequisite maps.
 - A desktop display for interactive viewing; Khronos validation layers for
   the validation checks.
 - Git and Git LFS. The author's CK-MPM repo is a submodule in
-  `third_party/CK-MPM`; `run.sh` fetches it and only the two sand-armadillo
+  `third_party/CK-MPM`; `run.py` fetches it and only the two sand-armadillo
   particle files it needs.
 
 ## Windows (experimental, not yet tested)
 
 The C++ sources avoid POSIX-only calls (`src/platform.cpp` holds the Linux and
-Windows variants), but the Windows path has not been built yet. `run.sh` needs
-bash, so until a cross-platform launcher exists use these steps in a Developer
+Windows variants), but the Windows path has not been built yet. Use a Developer
 PowerShell for Visual Studio:
 
 1. Install Visual Studio Build Tools (C++ workload), CMake 3.24+, Git with Git LFS,
    Python 3 and the LunarG Vulkan SDK (provides `glslc` and the validation layers).
    GLFW, GLM and nlohmann/json are downloaded automatically by CMake.
-2. Fetch the assets (skip the author's nested submodules):
-
-```powershell
-$env:GIT_LFS_SKIP_SMUDGE = 1
-git submodule update --init third_party/CK-MPM
-git -C third_party/CK-MPM lfs pull --include="asset/particle_data/sand_armadillo_0_jittered.bin,asset/particle_data/sand_armadillo_1_jittered.bin"
-```
-
-3. Configure and build:
-
-```powershell
-cmake -S . -B build
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
-```
-
-Known gaps: `CMakeLists.txt` looks for `python3`, which Windows usually lacks, and
-`tools/evaluate.py` looks for `.venv-reference/bin/python` instead of
-`Scripts/python.exe`.
+2. Run `py run.py live`. It fetches the assets, builds and launches; the
+   other commands work the same way, e.g. `py run.py test`.
 
 ## Run
 
-Run commands from this folder. `run.sh` configures and builds the application
-before launching it.
+Run commands from this folder. `run.py` checks the required tools, fetches the
+particle assets, then configures and builds the application before launching it.
+On Windows use `py run.py ...` instead of `./run.py ...`.
 
 ```sh
-./run.sh live                    # Simulate and view using live.json
-./run.sh calculate               # Calculate sand.json and save the scene
-./run.sh calculate my.json       # Calculate a custom configuration
-./run.sh play                    # Replay the saved affine particle scene
-./run.sh evaluate                # Run numerical reference checks
+./run.py live                    # Simulate and view using live.json
+./run.py calculate               # Calculate sand.json and save the scene
+./run.py calculate my.json       # Calculate a custom configuration
+./run.py play                    # Replay the saved affine particle scene
+./run.py evaluate                # Run numerical reference checks
 ```
 
 To calculate and immediately replay:
 
 ```sh
-./run.sh calculate && ./run.sh play
+./run.py calculate && ./run.py play
 ```
 
-For a bounded viewing run, use `./run.sh live --frames 180` or
-`./run.sh play --frames 180`.
+For a bounded viewing run, use `./run.py live --frames 180` or
+`./run.py play --frames 180`.
 
 ## Controls
 
@@ -172,12 +155,12 @@ also include GPU-safety-check wall time, step counts, transfer byte counters,
 rendered FPS and measured simulation speed. Evaluation results are written to
 `output/evaluation.json`.
 
-Run the tests with `run.sh`:
+Run the tests with `run.py`:
 
 ```sh
-./run.sh test                   # all tests
-./run.sh test -LE gpu           # CPU-only subset (no GPU or display)
-./run.sh play --frames 120      # manual saved-scene playback check (after calculate)
+./run.py test                   # all tests
+./run.py test -LE gpu           # CPU-only subset (no GPU or display)
+./run.py play --frames 120      # manual saved-scene playback check (after calculate)
 ```
 
 `particle_render` also requires the Khronos validation layers

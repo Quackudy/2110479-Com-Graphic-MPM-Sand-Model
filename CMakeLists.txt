@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
 project(ck_mpm_vulkan_starter LANGUAGES CXX)
 
+# One flat output directory for every generator: shaders (.spv) are loaded from
+# next to the executable, and the generator expression stops multi-config
+# generators (Visual Studio) from appending Debug/ or Release/.
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}>")
+
 find_package(Vulkan 1.3 REQUIRED)
 
 # Prefer system packages; download pinned versions only when they are missing.
@@ -16,7 +21,8 @@ FetchContent_Declare(nlohmann_json GIT_REPOSITORY https://github.com/nlohmann/js
   GIT_TAG v3.11.3 GIT_SHALLOW TRUE FIND_PACKAGE_ARGS 3.10)
 FetchContent_MakeAvailable(glfw3 glm nlohmann_json)
 find_program(GLSLC glslc REQUIRED)
-find_program(EVALUATION_PYTHON NAMES python3 HINTS /usr/bin REQUIRED)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+set(EVALUATION_PYTHON ${Python3_EXECUTABLE})
 
 set(SHADER_NAMES particle.vert particle.frag clear_grid.comp p2g.comp grid_update.comp g2p.comp material_update.comp particle_health.comp)
 foreach(NAME IN LISTS SHADER_NAMES)

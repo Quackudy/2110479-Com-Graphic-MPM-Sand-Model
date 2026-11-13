@@ -190,7 +190,7 @@ void calculate(const std::filesystem::path &executable, const std::filesystem::p
                   << " bytes).\nPhysics GPU: " << gpuMs / 1000
                   << " s | physics wall: " << physicsWall
                   << " s\nPerformance log: " << output / "performance.jsonl"
-                  << "\nRun ./run.sh play to view.\n";
+                  << "\nRun ./run.py play to view.\n";
     } catch (const std::exception &e) {
         log["status"] = "failed";
         log["error"] = e.what();
@@ -278,7 +278,7 @@ void play(uint32_t stopAfter) {
     const auto transfer = cache.metadata.value("transfer", std::string("unknown"));
     if (transfer != "affine")
         throw std::runtime_error("saved scene uses obsolete " + transfer +
-                                 " transfer; run ./run.sh calculate to create an affine scene");
+                                 " transfer; run ./run.py calculate to create an affine scene");
     const float floor = cache.metadata.at("settings").at("boundary");
     if (!std::isfinite(floor) || floor < 0 || floor >= .2f)
         throw std::runtime_error("invalid cached rendering settings");
@@ -602,11 +602,11 @@ int main(int argc, char **argv) {
         } else if (command == "help" || command == "--help")
             std::cout
                 << "Usage:\n"
-                   "  ./run.sh calculate [settings.json]   Calculate and replace the saved scene\n"
-                   "  ./run.sh live [--frames N]           Live reduced-detail physics and particle spheres\n"
-                   "  ./run.sh play [--frames N]           Play saved affine particles\n"
-                   "  ./run.sh evaluate                    Run numerical reference checks\n"
-                   "  ./run.sh test                        Build and run the ctest suite (run.sh only)\n";
+                   "  ./run.py calculate [settings.json]   Calculate and replace the saved scene\n"
+                   "  ./run.py live [--frames N]           Live reduced-detail physics and particle spheres\n"
+                   "  ./run.py play [--frames N]           Play saved affine particles\n"
+                   "  ./run.py evaluate                    Run numerical reference checks\n"
+                   "  ./run.py test                        Build and run the ctest suite (run.py only)\n";
         else
             throw std::runtime_error("unknown command; use --help");
         return 0;

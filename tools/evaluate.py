@@ -195,7 +195,7 @@ def run(executable, report_path):
                 report['cuda_material_reference'] = 'original unmodified CK-MPM ComputeStress and svd, executed on CUDA GPU'
             else:
                 report['cuda_material_reference'] = 'not_run; build optional cuda_reference target with CUDA toolkit and author repo'
-            taichi_python = root/'.venv-reference/bin/python'
+            taichi_python = root/'.venv-reference'/('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
             for kernel in ['ck', 'quadratic']:
                 p.tofile(directory/'input.bin')
                 cfg['kernel'] = kernel
