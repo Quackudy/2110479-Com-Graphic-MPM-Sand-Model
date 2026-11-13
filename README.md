@@ -10,36 +10,53 @@ the mathematics learning guide, including derivations and prerequisite maps.
 
 ## Requirements
 
-- C++20 compiler, CMake 3.21+, Vulkan 1.3 SDK and `glslc`.
-- GLFW 3.3+, GLM and nlohmann/json 3.10+.
+- C++20 compiler, CMake 3.24+, Vulkan 1.3 SDK and `glslc`.
+- GLFW 3.3+, GLM and nlohmann/json 3.10+. CMake uses installed packages when
+  found (Arch: `pacman -S glfw glm nlohmann-json`); otherwise it downloads
+  pinned versions (GLFW 3.4, GLM 1.0.1, nlohmann/json 3.11.3) at configure
+  time, which needs network access and Git.
 - GPU supporting Vulkan buffer float32 atomic addition and GPU timestamps.
 - Python 3 with NumPy for numerical checks.
 - A desktop display for interactive viewing; Khronos validation layers for
   the validation checks.
-- The neighboring `../CK-MPM` checkout with hydrated sand-armadillo particle
-  assets in `asset/particle_data`.
+- Git and Git LFS. The author's CK-MPM repo is a submodule in
+  `third_party/CK-MPM`; `run.py` fetches it and only the two sand-armadillo
+  particle files it needs.
+
+## Windows (experimental, not yet tested)
+
+The C++ sources avoid POSIX-only calls (`src/platform.cpp` holds the Linux and
+Windows variants), but the Windows path has not been built yet. Use a Developer
+PowerShell for Visual Studio:
+
+1. Install Visual Studio Build Tools (C++ workload), CMake 3.24+, Git with Git LFS,
+   Python 3 and the LunarG Vulkan SDK (provides `glslc` and the validation layers).
+   GLFW, GLM and nlohmann/json are downloaded automatically by CMake.
+2. Run `py run.py live`. It fetches the assets, builds and launches; the
+   other commands work the same way, e.g. `py run.py test`.
 
 ## Run
 
-Run commands from this folder. `run.sh` configures and builds the application
-before launching it.
+Run commands from this folder. `run.py` checks the required tools, fetches the
+particle assets, then configures and builds the application before launching it.
+On Windows use `py run.py ...` instead of `./run.py ...`.
 
 ```sh
-./run.sh live                    # Simulate and view using live.json
-./run.sh calculate               # Calculate sand.json and save the scene
-./run.sh calculate my.json       # Calculate a custom configuration
-./run.sh play                    # Replay the saved affine particle scene
-./run.sh evaluate                # Run numerical reference checks
+./run.py live                    # Simulate and view using live.json
+./run.py calculate               # Calculate sand.json and save the scene
+./run.py calculate my.json       # Calculate a custom configuration
+./run.py play                    # Replay the saved affine particle scene
+./run.py evaluate                # Run numerical reference checks
 ```
 
 To calculate and immediately replay:
 
 ```sh
-./run.sh calculate && ./run.sh play
+./run.py calculate && ./run.py play
 ```
 
-For a bounded viewing run, use `./run.sh live --frames 180` or
-`./run.sh play --frames 180`.
+For a bounded viewing run, use `./run.py live --frames 180` or
+`./run.py play --frames 180`.
 
 ## Controls
 
@@ -138,14 +155,16 @@ also include GPU-safety-check wall time, step counts, transfer byte counters,
 rendered FPS and measured simulation speed. Evaluation results are written to
 `output/evaluation.json`.
 
-After building:
+Run the tests with `run.py`:
 
 ```sh
-ctest --test-dir build --output-on-failure
-/usr/bin/python3 tests/live_smoke.py
-bash tests/render_smoke.sh              # Synthetic saved-particle rendering fixture
-bash tests/render_smoke.sh play         # Saved-scene playback check
+./run.py test                   # all tests
+./run.py test -LE gpu           # CPU-only subset (no GPU or display)
+./run.py play --frames 120      # manual saved-scene playback check (after calculate)
 ```
+
+`particle_render` also requires the Khronos validation layers
+(`vulkan-validation-layers` on Arch) and fails without them.
 
 Tests cover camera transforms, configuration validation, saved-scene replacement
 and rollback, CK/quadratic transfer stages, affine-state reuse over two steps,

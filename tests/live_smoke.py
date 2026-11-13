@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Desktop/GPU integration check: live evolution without touching scene caches."""
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -10,7 +11,8 @@ def snapshot():
     return [(p.stat().st_size, p.stat().st_mtime_ns) if p.exists() else None for p in paths]
 
 before = snapshot()
-result = subprocess.run([str(root/'build/ck_mpm_starter'), 'live', '--frames', '180'], cwd=root,
+binary = root/'build'/('ck_mpm_starter.exe' if os.name == 'nt' else 'ck_mpm_starter')
+result = subprocess.run([str(binary), 'live', '--frames', '180'], cwd=root,
                         capture_output=True, text=True)
 print(result.stdout, end='')
 print(result.stderr, end='')

@@ -1,11 +1,28 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.24)
 project(ck_mpm_vulkan_starter LANGUAGES CXX)
 
+# One flat output directory for every generator: shaders (.spv) are loaded from
+# next to the executable, and the generator expression stops multi-config
+# generators (Visual Studio) from appending Debug/ or Release/.
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}>")
+
 find_package(Vulkan 1.3 REQUIRED)
-find_package(glfw3 3.3 REQUIRED)
-find_package(glm CONFIG REQUIRED)
+
+# Prefer system packages; download pinned versions only when they are missing.
+include(FetchContent)
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(glfw3 GIT_REPOSITORY https://github.com/glfw/glfw.git
+  GIT_TAG 3.4 GIT_SHALLOW TRUE FIND_PACKAGE_ARGS 3.3 NAMES glfw3)
+FetchContent_Declare(glm GIT_REPOSITORY https://github.com/g-truc/glm.git
+  GIT_TAG 1.0.1 GIT_SHALLOW TRUE FIND_PACKAGE_ARGS CONFIG)
+FetchContent_Declare(nlohmann_json GIT_REPOSITORY https://github.com/nlohmann/json.git
+  GIT_TAG v3.11.3 GIT_SHALLOW TRUE FIND_PACKAGE_ARGS 3.10)
+FetchContent_MakeAvailable(glfw3 glm nlohmann_json)
 find_program(GLSLC glslc REQUIRED)
-find_program(EVALUATION_PYTHON NAMES python3 HINTS /usr/bin REQUIRED)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+set(EVALUATION_PYTHON ${Python3_EXECUTABLE})
 
 set(SHADER_NAMES particle.vert particle.frag clear_grid.comp p2g.comp grid_update.comp g2p.comp material_update.comp particle_health.comp)
 foreach(NAME IN LISTS SHADER_NAMES)
@@ -18,9 +35,8 @@ foreach(NAME IN LISTS SHADER_NAMES)
   list(APPEND SHADERS ${CMAKE_CURRENT_BINARY_DIR}/${NAME}.spv)
 endforeach()
 
-find_package(nlohmann_json 3.10 REQUIRED)
 add_executable(ck_mpm_starter src/main.cpp src/renderer.cpp src/vulkan_context.cpp src/scene.cpp
-  src/simulation_config.cpp src/simulation.cpp src/scene_cache.cpp ${SHADERS})
+  src/simulation_config.cpp src/simulation.cpp src/scene_cache.cpp src/platform.cpp ${SHADERS})
 target_link_libraries(ck_mpm_starter PRIVATE nlohmann_json::nlohmann_json)
 target_compile_definitions(ck_mpm_starter PRIVATE
   PROJECT_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -44,7 +60,7 @@ endif()
 
 # Optional reference executable; the simulator itself has no CUDA dependency.
 find_program(NVCC nvcc HINTS /opt/cuda/bin)
-set(AUTHOR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../CK-MPM)
+set(AUTHOR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/CK-MPM)
 if(NVCC AND EXISTS ${AUTHOR_DIR}/include/mpm_material.cuh)
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/cuda_material_reference
     COMMAND ${NVCC} -std=c++20 -O2 --expt-relaxed-constexpr --extended-lambda
@@ -58,7 +74,7 @@ if(NVCC AND EXISTS ${AUTHOR_DIR}/include/mpm_material.cuh)
 endif()
 
 if(BUILD_TESTING)
-  add_executable(cache_test tests/cache_test.cpp src/scene_cache.cpp src/simulation_config.cpp)
+  add_executable(cache_test tests/cache_test.cpp src/scene_cache.cpp src/simulation_config.cpp src/platform.cpp)
   target_compile_features(cache_test PRIVATE cxx_std_20)
   target_include_directories(cache_test PRIVATE src)
   target_link_libraries(cache_test PRIVATE glm::glm nlohmann_json::nlohmann_json)
@@ -76,4 +92,8 @@ if(BUILD_TESTING)
   target_include_directories(particle_render_test PRIVATE src)
   target_link_libraries(particle_render_test PRIVATE glfw Vulkan::Vulkan glm::glm)
   add_dependencies(particle_render_test ck_mpm_starter)
+  add_test(NAME particle_render COMMAND particle_render_test)
+  add_test(NAME live_integration COMMAND ${EVALUATION_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/live_smoke.py)
+  set_tests_properties(particle_render live_integration PROPERTIES LABELS "gpu" RUN_SERIAL TRUE TIMEOUT 180
+    FAIL_REGULAR_EXPRESSION "\\[Vulkan validation\\]")
 endif()

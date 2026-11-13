@@ -39,7 +39,7 @@ folder for their companion/source links to resolve. PDF viewers may require
 approval before opening relative source-file links.
 
 The local paper is `../../../CK-MPM Paper.pdf`; source links use paths relative
-to the Vulkan project root. The neighboring CK-MPM checkout supplies the author
+to the Vulkan project root. The `third_party/CK-MPM` submodule supplies the author
 source links. Bibliographies include primary papers and continuum-mechanics
 teaching references.
 

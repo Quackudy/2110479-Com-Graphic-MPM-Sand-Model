@@ -10,6 +10,7 @@ int main() {
     if (!window) return 1;
     {
         VulkanContext context(window);
+        if (!context.validationEnabled()) throw std::runtime_error("Vulkan validation layers unavailable");
         Renderer renderer(context, PROJECT_BINARY_DIRECTORY, 2, .01f, .03f);
         scene::Camera camera;
         camera.position = {1.1f,.7f,1.3f};

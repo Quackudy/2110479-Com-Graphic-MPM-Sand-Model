@@ -1,3 +1,4 @@
+#include "platform.hpp"
 #include "renderer.hpp"
 #include "scene_cache.hpp"
 #include "simulation.hpp"
@@ -6,20 +7,13 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <fcntl.h>
 #include <fstream>
 #include <future>
 #include <glm/gtc/quaternion.hpp>
 #include <iomanip>
 #include <iostream>
 #include <numeric>
-#include <spawn.h>
 #include <sstream>
-#include <sys/file.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
-extern char **environ;
 namespace {
 using Clock = std::chrono::steady_clock;
 const std::filesystem::path root = PROJECT_DIRECTORY;
@@ -30,10 +24,7 @@ double elapsed(Clock::time_point begin) {
     return std::chrono::duration<double>(Clock::now() - begin).count();
 }
 std::string timestamp() {
-    auto now = std::chrono::system_clock::now();
-    auto t = std::chrono::system_clock::to_time_t(now);
-    std::tm tm{};
-    gmtime_r(&t, &tm);
+    const std::tm tm = platform::utcTime(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
     std::ostringstream s;
     s << std::put_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
     return s.str();
@@ -44,39 +35,21 @@ void logRun(const Json &log) {
     file << log.dump() << '\n';
     file.flush();
 }
+std::filesystem::path calculationLockPath() {
+    std::filesystem::create_directories(output);
+    return output / "calculate.lock";
+}
 struct CalculationLock {
-    int fd = -1;
+    platform::FileLock lock{calculationLockPath()};
     CalculationLock() {
-        std::filesystem::create_directories(output);
-        fd = open((output / "calculate.lock").c_str(), O_CREAT | O_RDWR, 0600);
-        if (fd < 0)
-            throw std::runtime_error("cannot open calculation lock");
-        if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
-            close(fd);
-            fd = -1;
+        if (!lock.acquired())
             throw std::runtime_error("another calculation is already running");
-        }
-    }
-    ~CalculationLock() {
-        if (fd >= 0)
-            close(fd);
     }
 };
 int evaluate(const std::filesystem::path &executable) {
     std::filesystem::remove(output / "evaluation.json");
-    std::string script = (root / "tools/evaluate.py").string(), exe = executable.string(),
-                report = (output / "evaluation.json").string();
-    std::array<char *, 5> args{const_cast<char *>(EVALUATION_PYTHON), script.data(), exe.data(),
-                               report.data(), nullptr};
-    pid_t pid;
-    if (posix_spawn(&pid, EVALUATION_PYTHON, nullptr, nullptr, args.data(), environ) != 0)
-        throw std::runtime_error("cannot launch Python evaluation");
-    int status = 0;
-    while (waitpid(pid, &status, 0) < 0) {
-        if (errno != EINTR)
-            throw std::runtime_error("cannot wait for evaluation");
-    }
-    return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+    return platform::runProcess({EVALUATION_PYTHON, root / "tools/evaluate.py", executable,
+                                 output / "evaluation.json"});
 }
 void calculate(const std::filesystem::path &executable, const std::filesystem::path &configPath) {
     CalculationLock lock;
@@ -217,7 +190,7 @@ void calculate(const std::filesystem::path &executable, const std::filesystem::p
                   << " bytes).\nPhysics GPU: " << gpuMs / 1000
                   << " s | physics wall: " << physicsWall
                   << " s\nPerformance log: " << output / "performance.jsonl"
-                  << "\nRun ./run.sh play to view.\n";
+                  << "\nRun ./run.py play to view.\n";
     } catch (const std::exception &e) {
         log["status"] = "failed";
         log["error"] = e.what();
@@ -305,7 +278,7 @@ void play(uint32_t stopAfter) {
     const auto transfer = cache.metadata.value("transfer", std::string("unknown"));
     if (transfer != "affine")
         throw std::runtime_error("saved scene uses obsolete " + transfer +
-                                 " transfer; run ./run.sh calculate to create an affine scene");
+                                 " transfer; run ./run.py calculate to create an affine scene");
     const float floor = cache.metadata.at("settings").at("boundary");
     if (!std::isfinite(floor) || floor < 0 || floor >= .2f)
         throw std::runtime_error("invalid cached rendering settings");
@@ -602,7 +575,7 @@ void fixtures(const std::filesystem::path &directory, const std::filesystem::pat
 } // namespace
 int main(int argc, char **argv) {
     try {
-        const auto exe = std::filesystem::canonical("/proc/self/exe");
+        const auto exe = platform::executablePath();
         const std::string command = argc >= 2 ? argv[1] : "help";
         if (command == "calculate" && argc <= 3)
             calculate(exe, argc == 3 ? std::filesystem::path(argv[2]) : root / "sand.json");
@@ -628,10 +601,12 @@ int main(int argc, char **argv) {
             return evaluate(exe);
         } else if (command == "help" || command == "--help")
             std::cout
-                << "Usage:\n  ./run.sh calculate [settings.json]   Calculate and replace the saved "
-                   "scene\n  ./run.sh live [--frames N]           Live reduced-detail physics and "
-                   "particle spheres\n  ./run.sh play [--frames N]           Play saved affine particles\n  ./run.sh "
-                   "evaluate                    Run numerical reference checks\n";
+                << "Usage:\n"
+                   "  ./run.py calculate [settings.json]   Calculate and replace the saved scene\n"
+                   "  ./run.py live [--frames N]           Live reduced-detail physics and particle spheres\n"
+                   "  ./run.py play [--frames N]           Play saved affine particles\n"
+                   "  ./run.py evaluate                    Run numerical reference checks\n"
+                   "  ./run.py test                        Build and run the ctest suite (run.py only)\n";
         else
             throw std::runtime_error("unknown command; use --help");
         return 0;
