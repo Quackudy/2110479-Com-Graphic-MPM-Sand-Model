@@ -16,8 +16,9 @@ the mathematics learning guide, including derivations and prerequisite maps.
 - Python 3 with NumPy for numerical checks.
 - A desktop display for interactive viewing; Khronos validation layers for
   the validation checks.
-- The neighboring `../CK-MPM` checkout with hydrated sand-armadillo particle
-  assets in `asset/particle_data`.
+- Git and Git LFS. The author's CK-MPM repo is a submodule in
+  `third_party/CK-MPM`; `run.sh` fetches it and only the two sand-armadillo
+  particle files it needs.
 
 ## Run
 

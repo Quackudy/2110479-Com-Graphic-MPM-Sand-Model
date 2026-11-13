@@ -122,7 +122,7 @@ m_{i,k}&\mathrel{+}=w_{i,p,k}m_p.
 \end{align*}
 Here $\mat{q}$ is grid momentum. In particular, D inverse multiplies T on the
 \emph{left}, matching \code{contribution} in the author's
-\src{../CK-MPM/include/mpm_algorithm.cuh}, \code{G2P2G()}.
+\src{../third_party/CK-MPM/include/mpm_algorithm.cuh}, \code{G2P2G()}.
 The companion's section ``MLS reconstruction and a convention audit'' derives
 the conventional column-vector force ordering $\mat{T}\mat{D}^{-1}\mat{r}$.
 That order differs from the source ordering shown above in general. A shared
@@ -148,9 +148,9 @@ explicitly summing the kernel derivatives in Eq.~(18).
 \section{Sand model and source provenance}
 The paper identifies Drucker--Prager sand and its example parameters in \S6.2.
 The material overload of \code{ComputeStress()} in
-\src{../CK-MPM/include/mpm_material.cuh} uses the model
+\src{../third_party/CK-MPM/include/mpm_material.cuh} uses the model
 \code{kDruckerPragerStvkhencky}. Its callers are in
-\src{../CK-MPM/include/mpm_algorithm.cuh}.
+\src{../third_party/CK-MPM/include/mpm_algorithm.cuh}.
 
 In \src{shaders/material.glsl}, \code{svd3()} factors F using one-sided Jacobi
 sweeps. \code{sandMaterial()} evaluates logarithmic stretches, projects plastic

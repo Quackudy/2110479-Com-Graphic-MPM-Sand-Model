@@ -44,7 +44,7 @@ endif()
 
 # Optional reference executable; the simulator itself has no CUDA dependency.
 find_program(NVCC nvcc HINTS /opt/cuda/bin)
-set(AUTHOR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../CK-MPM)
+set(AUTHOR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/CK-MPM)
 if(NVCC AND EXISTS ${AUTHOR_DIR}/include/mpm_material.cuh)
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/cuda_material_reference
     COMMAND ${NVCC} -std=c++20 -O2 --expt-relaxed-constexpr --extended-lambda

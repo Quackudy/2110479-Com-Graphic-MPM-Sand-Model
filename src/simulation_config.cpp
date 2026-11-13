@@ -42,7 +42,7 @@ SimulationConfig SimulationConfig::load(const std::filesystem::path &path, bool 
     c.cfl = j.value("cfl", c.cfl);
     c.dt = j.value("dt", c.dt);
     c.boundary = j.value("boundary", c.boundary);
-    c.assets = j.value("assets", std::string("../CK-MPM/asset/particle_data"));
+    c.assets = j.value("assets", std::string("third_party/CK-MPM/asset/particle_data"));
     if (c.assets.is_relative())
         c.assets = std::filesystem::absolute(path).parent_path() / c.assets;
     c.assets = std::filesystem::weakly_canonical(c.assets);

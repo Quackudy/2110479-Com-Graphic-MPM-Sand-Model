@@ -1,5 +1,5 @@
 {
-  "assets": "../CK-MPM/asset/particle_data",
+  "assets": "third_party/CK-MPM/asset/particle_data",
   "kernel": "ck",
   "grid": 128,
   "particles_per_model": 250000,

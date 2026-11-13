@@ -172,14 +172,14 @@ def run(executable, report_path):
     report['reference_source_sha256'] = {
         str(p.relative_to(root.parent)): hashlib.sha256(p.read_bytes()).hexdigest()
         for p in [root/'tools/taichi_reference.py', root/'tools/evaluate.py',
-                  root.parent/'CK-MPM/include/mpm_material.cuh',
-                  root.parent/'CK-MPM/include/mpm_math.cuh',
-                  root.parent/'CK-MPM/include/mpm_algorithm.cuh'] if p.exists()}
+                  root/'third_party/CK-MPM/include/mpm_material.cuh',
+                  root/'third_party/CK-MPM/include/mpm_math.cuh',
+                  root/'third_party/CK-MPM/include/mpm_algorithm.cuh'] if p.exists()}
     report_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with tempfile.TemporaryDirectory(prefix='ck-mpm-check-') as tmp:
             directory = Path(tmp)
-            cfg = {'assets': str(root.parent/'CK-MPM/asset/particle_data'), 'grid': 32, 'particles_per_model': 32,
+            cfg = {'assets': str(root/'third_party/CK-MPM/asset/particle_data'), 'grid': 32, 'particles_per_model': 32,
                    'fps': 24, 'seconds': 1, 'young_modulus': 10000, 'poisson_ratio': .4, 'density': 2,
                    'gravity': -2, 'friction_angle': 30, 'cfl': .25, 'dt': 1e-6, 'boundary': .125}
             p = fixture()
