@@ -76,4 +76,8 @@ if(BUILD_TESTING)
   target_include_directories(particle_render_test PRIVATE src)
   target_link_libraries(particle_render_test PRIVATE glfw Vulkan::Vulkan glm::glm)
   add_dependencies(particle_render_test ck_mpm_starter)
+  add_test(NAME particle_render COMMAND particle_render_test)
+  add_test(NAME live_integration COMMAND ${EVALUATION_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/live_smoke.py)
+  set_tests_properties(particle_render live_integration PROPERTIES LABELS "gpu" RUN_SERIAL TRUE TIMEOUT 180
+    FAIL_REGULAR_EXPRESSION "\\[Vulkan validation\\]")
 endif()

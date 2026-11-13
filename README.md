@@ -139,14 +139,16 @@ also include GPU-safety-check wall time, step counts, transfer byte counters,
 rendered FPS and measured simulation speed. Evaluation results are written to
 `output/evaluation.json`.
 
-After building:
+Run the tests with `run.sh`:
 
 ```sh
-ctest --test-dir build --output-on-failure
-/usr/bin/python3 tests/live_smoke.py
-bash tests/render_smoke.sh              # Synthetic saved-particle rendering fixture
-bash tests/render_smoke.sh play         # Saved-scene playback check
+./run.sh test                   # all tests
+./run.sh test -LE gpu           # CPU-only subset (no GPU or display)
+./run.sh play --frames 120      # manual saved-scene playback check (after calculate)
 ```
+
+`particle_render` also requires the Khronos validation layers
+(`vulkan-validation-layers` on Arch) and fails without them.
 
 Tests cover camera transforms, configuration validation, saved-scene replacement
 and rollback, CK/quadratic transfer stages, affine-state reuse over two steps,

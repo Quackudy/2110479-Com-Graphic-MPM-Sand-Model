@@ -49,6 +49,8 @@ check_prerequisites
 setup_assets
 build
 if [ "${1:-}" = test ]; then
-  exec ctest --test-dir build --output-on-failure
+  shift
+  # Extra arguments go to ctest, e.g. `./run.sh test -LE gpu` for CPU-only checks.
+  exec ctest --test-dir build --output-on-failure "$@"
 fi
 exec ./build/ck_mpm_starter "$@"
