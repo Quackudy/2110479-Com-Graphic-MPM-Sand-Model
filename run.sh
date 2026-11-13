@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Bootstrap wrapper: check tools, fetch assets, build, then run the binary.
+# Command documentation lives in the binary (`./run.sh --help`); `test` is
+# handled here. Particle data is validated by SimulationConfig::loadParticles.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -24,21 +27,28 @@ check_prerequisites() {
 
 # Fetch the author's CK-MPM submodule and only the particle files we need.
 # Non-recursive on purpose: the author's nested submodules are not required.
+# git-lfs marks hydrated files with '*' and pointer stubs with '-', so reruns
+# skip the network once the files are present.
 setup_assets() {
-  if [ ! -e "$author/include/mpm_material.cuh" ]; then
-    GIT_LFS_SKIP_SMUDGE=1 git submodule update --init "$author"
-  fi
-  local include
+  local include hydrated=0
   include=$(IFS=,; echo "${assets[*]}")
+  if [ -e "$author/include/mpm_material.cuh" ]; then
+    hydrated=$(cd "$author" && git lfs ls-files --include="$include" | grep -c ' \* ' || true)
+  fi
+  ((hydrated == ${#assets[@]})) && return
+  GIT_LFS_SKIP_SMUDGE=1 git submodule update --init "$author"
   (cd "$author" && git lfs pull --include="$include")
 }
 
-build_and_run() {
+build() {
   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-  cmake --build build -j 2
-  exec ./build/ck_mpm_starter "$@"
+  cmake --build build -j "$(nproc)"
 }
 
 check_prerequisites
 setup_assets
-build_and_run "$@"
+build
+if [ "${1:-}" = test ]; then
+  exec ctest --test-dir build --output-on-failure
+fi
+exec ./build/ck_mpm_starter "$@"

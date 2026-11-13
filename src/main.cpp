@@ -628,10 +628,12 @@ int main(int argc, char **argv) {
             return evaluate(exe);
         } else if (command == "help" || command == "--help")
             std::cout
-                << "Usage:\n  ./run.sh calculate [settings.json]   Calculate and replace the saved "
-                   "scene\n  ./run.sh live [--frames N]           Live reduced-detail physics and "
-                   "particle spheres\n  ./run.sh play [--frames N]           Play saved affine particles\n  ./run.sh "
-                   "evaluate                    Run numerical reference checks\n";
+                << "Usage:\n"
+                   "  ./run.sh calculate [settings.json]   Calculate and replace the saved scene\n"
+                   "  ./run.sh live [--frames N]           Live reduced-detail physics and particle spheres\n"
+                   "  ./run.sh play [--frames N]           Play saved affine particles\n"
+                   "  ./run.sh evaluate                    Run numerical reference checks\n"
+                   "  ./run.sh test                        Build and run the ctest suite (run.sh only)\n";
         else
             throw std::runtime_error("unknown command; use --help");
         return 0;

@@ -107,7 +107,8 @@ std::vector<Particle> SimulationConfig::loadParticles() const {
         if (!std::filesystem::exists(path) ||
             std::filesystem::file_size(path) != 255951 * 3 * sizeof(float))
             throw std::runtime_error("missing or unhydrated author particle asset: " +
-                                     path.string());
+                                     path.string() +
+                                     " (run ./run.sh, or `git lfs pull` in third_party/CK-MPM)");
         std::ifstream input(path, std::ios::binary);
         std::vector<float> xyz(255951 * 3);
         if (!input.read(reinterpret_cast<char *>(xyz.data()), xyz.size() * sizeof(float)))
